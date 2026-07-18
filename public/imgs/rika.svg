@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+	<title id="title">Rika</title>
+	<desc id="desc">A dark portrait with a violet eye and code brackets.</desc>
+	<defs>
+		<linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+			<stop offset="0" stop-color="#090b12" />
+			<stop offset="1" stop-color="#21152e" />
+		</linearGradient>
+		<linearGradient id="hair" x1="0" y1="0" x2="0.8" y2="1">
+			<stop offset="0" stop-color="#252235" />
+			<stop offset="1" stop-color="#080910" />
+		</linearGradient>
+	</defs>
+	<rect width="512" height="512" rx="80" fill="url(#background)" />
+	<circle cx="256" cy="229" r="140" fill="#b7a3b5" />
+	<path d="M113 250C90 104 177 48 270 55c105 8 159 85 128 219-19-51-58-92-101-116-44 62-100 103-184 92Z" fill="url(#hair)" />
+	<path d="M154 222c-18 103 10 167 52 212H96c14-49 16-112 5-186l53-26Zm204-4 54 32c-12 74-9 136 6 184H306c43-49 70-115 52-216Z" fill="#0a0b12" />
+	<path d="M130 512c9-94 57-144 126-144s117 50 126 144H130Z" fill="#171420" />
+	<path d="M194 250c23-14 48-13 65 3-24 22-48 22-65-3Z" fill="#ece8f0" />
+	<ellipse cx="226" cy="252" rx="13" ry="18" fill="#8b5cf6" />
+	<circle cx="231" cy="246" r="4" fill="#f4efff" />
+	<path d="M291 252c10-8 23-9 34-2" fill="none" stroke="#25202c" stroke-width="7" stroke-linecap="round" />
+	<path d="M232 318c18 8 37 8 55-1" fill="none" stroke="#51404d" stroke-width="7" stroke-linecap="round" />
+	<path d="m70 380-34 26 34 26M442 380l34 26-34 26" fill="none" stroke="#8b5cf6" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" />
+</svg>

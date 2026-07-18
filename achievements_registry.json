@@ -1,0 +1,116 @@
+{
+	"achievements": {
+		"installed": {
+			"name": "Rika.achievements.installed.name",
+			"description": "Rika.achievements.installed.description",
+			"icon": "https://api.iconify.design/material-symbols/restart-alt.svg",
+			"locked_description": "Rika.achievements.installed.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"first_reply": {
+			"name": "Rika.achievements.first_reply.name",
+			"description": "Rika.achievements.first_reply.description",
+			"icon": "https://api.iconify.design/material-symbols/mark-chat-unread.svg",
+			"locked_description": "Rika.achievements.first_reply.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"betrayer": {
+			"name": "Rika.achievements.betrayer.name",
+			"description": "Rika.achievements.betrayer.description",
+			"icon": "https://api.iconify.design/material-symbols/heart-broken.svg",
+			"locked_description": "Rika.achievements.betrayer.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"meet_gentian_aphrodite": {
+			"name": "Rika.achievements.meet_gentian_aphrodite.name",
+			"description": "Rika.achievements.meet_gentian_aphrodite.description",
+			"icon": "https://api.iconify.design/material-symbols/genetics.svg",
+			"locked_description": "Rika.achievements.meet_gentian_aphrodite.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"set_reference_photo": {
+			"name": "Rika.achievements.set_reference_photo.name",
+			"description": "Rika.achievements.set_reference_photo.description",
+			"icon": "https://api.iconify.design/material-symbols/person-pin-circle.svg",
+			"locked_description": "Rika.achievements.set_reference_photo.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"set_reference_voice": {
+			"name": "Rika.achievements.set_reference_voice.name",
+			"description": "Rika.achievements.set_reference_voice.description",
+			"icon": "https://api.iconify.design/material-symbols/graphic-eq.svg",
+			"locked_description": "Rika.achievements.set_reference_voice.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"psychological_mirror": {
+			"name": "Rika.achievements.psychological_mirror.name",
+			"description": "Rika.achievements.psychological_mirror.description",
+			"icon": "https://api.iconify.design/material-symbols/psychology-alt.svg",
+			"locked_description": "Rika.achievements.psychological_mirror.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"use_coderunner": {
+			"name": "Rika.achievements.use_coderunner.name",
+			"description": "Rika.achievements.use_coderunner.description",
+			"icon": "https://api.iconify.design/material-symbols/terminal.svg",
+			"locked_description": "Rika.achievements.use_coderunner.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"use_websearch": {
+			"name": "Rika.achievements.use_websearch.name",
+			"description": "Rika.achievements.use_websearch.description",
+			"icon": "https://api.iconify.design/material-symbols/visibility.svg",
+			"locked_description": "Rika.achievements.use_websearch.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"use_webbrowse": {
+			"name": "Rika.achievements.use_webbrowse.name",
+			"description": "Rika.achievements.use_webbrowse.description",
+			"icon": "https://api.iconify.design/material-symbols/preview.svg",
+			"locked_description": "Rika.achievements.use_webbrowse.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"use_deep_research": {
+			"name": "Rika.achievements.use_deep_research.name",
+			"description": "Rika.achievements.use_deep_research.description",
+			"icon": "https://api.iconify.design/material-symbols/hub.svg",
+			"locked_description": "Rika.achievements.use_deep_research.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"use_file_change": {
+			"name": "Rika.achievements.use_file_change.name",
+			"description": "Rika.achievements.use_file_change.description",
+			"icon": "https://api.iconify.design/material-symbols/fingerprint.svg",
+			"locked_description": "Rika.achievements.use_file_change.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"use_browser_integration": {
+			"name": "Rika.achievements.use_browser_integration.name",
+			"description": "Rika.achievements.use_browser_integration.description",
+			"icon": "https://api.iconify.design/material-symbols/desktop-windows.svg",
+			"locked_description": "Rika.achievements.use_browser_integration.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"use_sub_agent": {
+			"name": "Rika.achievements.use_sub_agent.name",
+			"description": "Rika.achievements.use_sub_agent.description",
+			"icon": "https://api.iconify.design/material-symbols/account-tree.svg",
+			"locked_description": "Rika.achievements.use_sub_agent.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"use_skill": {
+			"name": "Rika.achievements.use_skill.name",
+			"description": "Rika.achievements.use_skill.description",
+			"icon": "https://api.iconify.design/material-symbols/auto-stories.svg",
+			"locked_description": "Rika.achievements.use_skill.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		},
+		"remember_author": {
+			"name": "Rika.achievements.remember_author.name",
+			"description": "Rika.achievements.remember_author.description",
+			"icon": "https://api.iconify.design/material-symbols/lock-clock.svg",
+			"locked_description": "Rika.achievements.remember_author.locked_description",
+			"locked_icon": "https://api.iconify.design/line-md/question-circle.svg"
+		}
+	}
+}

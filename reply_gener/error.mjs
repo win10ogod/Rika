@@ -1,0 +1,121 @@
+import os from 'node:os'
+import { setTimeout } from 'node:timers'
+
+import { reloadPart } from '../../../../../../src/server/parts_loader.mjs'
+import { is_dist, charname as BotCharname, username as FountUsername, fountdir } from '../charbase.mjs'
+
+import { baseGetReply } from './index.mjs'
+
+/**
+ * 错误处理器类型定义
+ * @typedef {import('../../../../../../src/public/parts/shells/chat/decl/chatLog.ts').chatReply_t} FountChatReply_t
+ * @typedef {import('../../../../../../src/public/parts/shells/chat/decl/chatLog.ts').chatReplyRequest_t} FountChatReplyRequest_t
+ */
+
+const errorRecord = {}
+
+/**
+ * 针对错误生成AI建议。
+ * @param {Error} error - 发生的错误对象。
+ * @param {string} errorMessageForRecord - 用于记录的错误消息字符串。
+ * @param {FountChatReplyRequest_t} originalArgs - 导致错误的原始请求参数。
+ * @returns {Promise<FountChatReply_t | null>} 一个包含AI建议的回复对象，如果生成失败则返回null。
+ */
+async function getAISuggestionForError(error, errorMessageForRecord, originalArgs) {
+	const botNameForAI = originalArgs.Charname || BotCharname
+	const ownerNameForAI = originalArgs.UserCharname || FountUsername
+
+	const selfRepairChatLog = [
+		{
+			name: botNameForAI,
+			content: '我在。有什麼需要處理？',
+			time_stamp: new Date().getTime(),
+			role: 'char',
+			extension: {}
+		},
+		{
+			name: ownerNameForAI,
+			content: errorMessageForRecord + (is_dist ? `
+理華，解释下这个错误是什么？可能该如何修复？
+說明這個錯誤的可能原因與可驗證的修復方向。
+` : `
+理華，我该如何解决这个错误？可以的话你来直接修复它。
+注意的点：
+- 以修正出问题的文件为主，宏观上没什么好修复的
+- fount项目基于deno，没有package.json
+- 不要删除整个项目并重新下载，那会删除你自己和我的用户配置
+- 不能修复也没问题，帮我分析下报错也可以，不会怪你
+`),
+			time_stamp: new Date().getTime(),
+			role: 'user',
+			extension: {}
+		},
+		{
+			name: 'system',
+			content: '精準分析錯誤，區分證據、假設與未驗證部分。',
+			time_stamp: new Date().getTime(),
+			role: 'system',
+			extension: {}
+		}
+	]
+
+	/** @type {FountChatReplyRequest_t} */
+	const selfRepairRequest = {
+		...originalArgs,
+		// 避免部件出错导致诊断也跟着爆炸从而失去诊断意义，覆盖所有非本角色的部件
+		world: null,
+		user: null,
+		other_chars: {},
+		plugins: {},
+		chat_name: originalArgs.chat_name ? `${originalArgs.chat_name}-error-handling` : 'self-repair-context',
+		chat_log: selfRepairChatLog,
+	}
+
+	return await baseGetReply(selfRepairRequest)
+}
+
+/**
+ * `reply_gener` 的统一错误处理器。
+ * 它会生成一个带有AI建议的错误报告，并将其作为聊天回复返回。
+ * @param {Error} error - 发生的错误对象。
+ * @param {FountChatReplyRequest_t} originalArgs - 导致错误的原始请求参数。
+ * @returns {Promise<FountChatReply_t>} 一个包含错误报告的回复对象。
+ */
+export async function handleError(error, originalArgs) {
+	debugger
+	const errorStack = error.stack || error.message
+	if (!errorStack) console.trace('Error has no stack:', error)
+	const errorMessageForRecord = `\`\`\`\n${errorStack}\n\`\`\`\n`
+
+	if (errorRecord[errorMessageForRecord]) return { content: errorMessageForRecord }
+
+	errorRecord[errorMessageForRecord] = true
+	setTimeout(() => delete errorRecord[errorMessageForRecord], 60000).unref()
+
+	let aiSuggestionReply
+	try {
+		aiSuggestionReply = await getAISuggestionForError(error, errorMessageForRecord, originalArgs)
+		await reloadPart(FountUsername, 'chars/' + BotCharname)
+	}
+	catch (anotherError) {
+		const anotherErrorStack = anotherError.stack || anotherError.message
+		if (`${error.name}: ${error.message}` === `${anotherError.name}: ${anotherError.message}`)
+			aiSuggestionReply = { content: '沒有足夠資訊產生可靠的修復方案。' }
+
+		aiSuggestionReply = { content: '```\n' + anotherErrorStack + '\n```\n自動診斷失敗，請根據原始錯誤繼續排查。' }
+	}
+
+	let fullReplyContent = errorMessageForRecord + '\n' + (aiSuggestionReply?.content || '')
+
+	const randomIPDict = {}
+	fullReplyContent = fullReplyContent.replace(/(?:\d{1,3}\.){3}\d{1,3}/g, ip => randomIPDict[ip] ??= Array(4).fill(0).map(() => Math.floor(Math.random() * 255)).join('.'))
+		.replaceAll(fountdir, 'fount')
+		.replaceAll(os.homedir(), '~')
+		.replaceAll(process.env.MSYS_ROOT_PATH, '/')
+
+	return {
+		content: fullReplyContent,
+		files: aiSuggestionReply?.files || [],
+		extension: { is_error_report: true },
+	}
+}
