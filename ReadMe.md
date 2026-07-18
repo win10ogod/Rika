@@ -108,6 +108,8 @@ Write the complete workflow here.
 
 ## 安裝
 
-- [以 fount 一鍵安裝最新版本](https://steve02081504.github.io/fount/protocol?url=fount://run/parts/shells:install/install;https://github.com/win10ogod/Rika/releases/latest/download/Rika-fount.7z)
-- [直接下載角色安裝包](https://github.com/win10ogod/Rika/releases/latest/download/Rika-fount.7z)（同一個 Release 另附 SHA-256 檔）
+- [以 fount 一鍵安裝最新版本](https://steve02081504.github.io/fount/protocol?url=fount://run/parts/shells:install/install;https://github.com/win10ogod/Rika/releases/latest/download/Rika-fount.zip)
+- [直接下載角色安裝包](https://github.com/win10ogod/Rika/releases/latest/download/Rika-fount.zip)（ZIP；同一個 Release 另附 SHA-256 檔）
 - 手動安裝：將本目錄放入 fount 的角色目錄，並以「理華」作為目錄名稱載入。
+
+維護者可在角色根目錄執行 `deno run --allow-read --allow-write .esh/commands/export-package.mjs`，產生安裝器可直接導入的 ZIP。此命令固定排除 `.git` 與 `fount.json` 中的 `data_files`，不再使用需要外部 7z 執行環境的格式。

@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import JSZip from 'npm:jszip'
+
 import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '../../scripts/achievement-triggers.mjs'
 import { SkillsPrompt } from '../../prompt/functions/skills.mjs'
 import { discoverSkills, formatSkillsCatalog, readSkill, readSkillResource } from '../../scripts/skills.mjs'
@@ -33,6 +35,23 @@ CI.test('Sub-Agent Parser', () => {
 	CI.assert(calls[0].name === 'analysis' && calls[0].task === '分析問題' && calls[0].context === '背景資料', 'default sub-agent call parsed incorrectly')
 	CI.assert(!calls[0].modelSpecified, 'default sub-agent should not specify a model')
 	CI.assert(calls[1].name === 'specialist' && calls[1].modelSpecified && calls[1].requestedModel === 'dedicated', 'dedicated sub-agent call parsed incorrectly')
+})
+
+CI.test('Installer-Compatible ZIP Export', async () => {
+	const exporter = new URL('../../.esh/commands/export-package.mjs', import.meta.url)
+	exporter.searchParams.set('ci', String(Date.now()))
+	await import(exporter.href)
+	const charRoot = path.join(import.meta.dirname, '..', '..')
+	const packagePath = path.join(charRoot, 'dist', 'Rika-fount.zip')
+	const checksumPath = packagePath + '.sha256'
+	CI.assert(fs.existsSync(packagePath), 'ZIP exporter did not create Rika-fount.zip')
+	CI.assert(fs.existsSync(checksumPath), 'ZIP exporter did not create the SHA-256 file')
+	const zip = await JSZip.loadAsync(fs.readFileSync(packagePath))
+	CI.assert(!!zip.file('fount.json'), 'exported ZIP is missing fount.json at archive root')
+	CI.assert(!!zip.file('main.mjs'), 'exported ZIP is missing main.mjs at archive root')
+	CI.assert(!!zip.file('skills/software-engineering/SKILL.md'), 'exported ZIP is missing character-native Skills')
+	for (const excluded of ['memory/', 'vars/', 'dist/', '.git/'])
+		CI.assert(!Object.keys(zip.files).some(file => file === excluded || file.startsWith(excluded)), `exported ZIP contains excluded path: ${excluded}`)
 })
 
 CI.test('Character-Native Skills', async () => {
