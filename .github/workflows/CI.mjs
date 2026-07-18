@@ -4,6 +4,8 @@ import path from 'node:path'
 import JSZip from 'npm:jszip'
 
 import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '../../scripts/achievement-triggers.mjs'
+import { DiscordBotMain, GetBotConfigTemplate as GetDiscordBotConfigTemplate } from '../../interfaces/discord/index.mjs'
+import { TelegramBotMain, GetBotConfigTemplate as GetTelegramBotConfigTemplate } from '../../interfaces/telegram/index.mjs'
 import { SkillsPrompt } from '../../prompt/functions/skills.mjs'
 import { discoverSkills, formatSkillsCatalog, readSkill, readSkillResource } from '../../scripts/skills.mjs'
 import { parseSubAgentCalls } from '../../scripts/sub-agent.mjs'
@@ -21,6 +23,49 @@ await CI.test('Setup AI Source', async () => {
 		AIsources: { CI: 'CI', 'sub-agent': 'CI' },
 		disable_idle_event: true
 	})
+})
+
+CI.test('Platform Integration Contracts', async () => {
+	for (const interfaceName of ['telegram', 'discord', 'shellassist', 'browserIntegration', 'timers'])
+		CI.assert(!!CI.char.interfaces[interfaceName], `character interface is missing: ${interfaceName}`)
+
+	const telegramConfig = GetTelegramBotConfigTemplate()
+	for (const field of ['OwnerUserID', 'OwnerUserName', 'OwnerNameKeywords', 'MediaGroupFlushMs'])
+		CI.assert(Object.hasOwn(telegramConfig, field), `Telegram config field is missing: ${field}`)
+	const telegramEvents = new Map()
+	const telegramBot = {
+		telegram: {
+			getMe: () => Promise.resolve({ id: 1001, first_name: '理華', username: 'rika_ci_bot', is_bot: true })
+		},
+		on: (event, handler) => telegramEvents.set(event, handler)
+	}
+	const telegramAPI = await TelegramBotMain(telegramBot, telegramConfig)
+	CI.assert(telegramAPI.name === 'telegram', 'Telegram platform API was not registered')
+	for (const event of ['message', 'edited_message', 'my_chat_member', 'chat_member'])
+		CI.assert(telegramEvents.has(event), `Telegram event handler is missing: ${event}`)
+
+	const discordConfig = GetDiscordBotConfigTemplate()
+	for (const field of ['OwnerUserName', 'OwnerDiscordID', 'OwnerNameKeywords', 'BotActivityName', 'BotActivityType'])
+		CI.assert(Object.hasOwn(discordConfig, field), `Discord config field is missing: ${field}`)
+	const discordEvents = new Map()
+	const discordClient = {
+		user: {
+			id: '2001',
+			username: 'rika_ci_bot',
+			displayName: '理華',
+			setPresence: () => undefined
+		},
+		guilds: { cache: new Map() },
+		users: {
+			cache: new Map(),
+			fetch: id => Promise.resolve({ id, username: discordConfig.OwnerUserName })
+		},
+		on: (event, handler) => discordEvents.set(event, handler)
+	}
+	const discordAPI = await DiscordBotMain(discordClient, discordConfig)
+	CI.assert(discordAPI.name === 'discord', 'Discord platform API was not registered')
+	for (const event of ['messageCreate', 'typingStart', 'messageUpdate', 'messageDelete', 'guildCreate', 'guildMemberRemove'])
+		CI.assert(discordEvents.has(event), `Discord event handler is missing: ${event}`)
 })
 
 CI.test('Sub-Agent Parser', () => {
