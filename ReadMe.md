@@ -110,6 +110,7 @@ Write the complete workflow here.
 
 - [以 fount 一鍵安裝最新版本](https://steve02081504.github.io/fount/protocol?url=fount://run/parts/shells:install/install;https://github.com/win10ogod/Rika/releases/latest/download/Rika-fount.zip)
 - [直接下載角色安裝包](https://github.com/win10ogod/Rika/releases/latest/download/Rika-fount.zip)（ZIP；同一個 Release 另附 SHA-256 檔）
-- 手動安裝：將本目錄放入 fount 的角色目錄，並以「理華」作為目錄名稱載入。
+- 手動安裝：將本目錄放入 fount 的角色目錄，並以 `Rika` 作為技術目錄名稱載入；介面顯示名仍為「理華」。
+- 從 1.1.2 或更早版本升級時，請重新匯入安裝包，並在 Telegram／Discord Bot 設定中重新選擇「理華」。舊版本曾把顯示名「理華」誤當成技術 ID，會令 Windows 路由產生 `%25E7...` 的雙重編碼而無法載入角色。
 
 維護者可在角色根目錄執行 `deno run --allow-read --allow-write .esh/commands/export-package.mjs`，產生安裝器可直接導入的 ZIP。此命令固定排除 `.git` 與 `fount.json` 中的 `data_files`，不再使用需要外部 7z 執行環境的格式。

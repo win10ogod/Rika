@@ -49,7 +49,7 @@ jobs:
             CI_ROOT_SHELL="$(cygpath -u "$CI_ROOT")"
           fi
           FOUNT_ROOT="$CI_ROOT_SHELL/fount"
-          CHAR_ROOT="$FOUNT_ROOT/.vm_data_charCI/users/CI-user/chars/理華"
+          CHAR_ROOT="$FOUNT_ROOT/.vm_data_charCI/users/CI-user/chars/Rika"
           node - <<'NODE'
           const fs = require('node:fs')
           const path = require('node:path')
@@ -78,7 +78,7 @@ jobs:
           echo "CI_ROOT_SHELL=$CI_ROOT_SHELL" >> "$GITHUB_ENV"
           echo "GITHUB_ACTION_PATH=$CI_ROOT" >> "$GITHUB_ENV"
           echo "CI_username=CI-user" >> "$GITHUB_ENV"
-          echo "CI_charname=理華" >> "$GITHUB_ENV"
+          echo "CI_charname=Rika" >> "$GITHUB_ENV"
 
       - name: Setup latest Deno
         uses: denoland/setup-deno@v2
