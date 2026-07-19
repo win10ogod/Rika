@@ -1,10 +1,10 @@
 /** @typedef {import('../../../../../../../src/decl/AIsource.ts').AIsource_t} AIsource_t */
 
+import { mergeStructPromptChatLog } from '../../../../../../../src/public/parts/shells/chat/src/prompt_struct/index.mjs'
 import { getConfiguredAISource } from '../../AISource/index.mjs'
-import { mergeStructPromptChatLog } from '../../../../../../../src/public/parts/shells/chat/src/prompt_struct.mjs'
 import { unlockAchievement } from '../../scripts/achievements.mjs'
-import { parseSubAgentCalls } from '../../scripts/sub-agent.mjs'
 import { statisticDatas } from '../../scripts/statistics.mjs'
+import { parseSubAgentCalls } from '../../scripts/sub-agent.mjs'
 import { baseGetReply } from '../index.mjs'
 
 /**
@@ -152,7 +152,7 @@ export async function subAgentHandler(result, args) {
 	statisticDatas.toolUsage.subAgentDelegations = (statisticDatas.toolUsage.subAgentDelegations || 0) + calls.length
 	const outcomes = await Promise.all(calls.map(call => runSubAgent(call, args, parentChatLog)))
 	result.extension.sub_agents = [
-		...(result.extension.sub_agents || []),
+		...result.extension.sub_agents || [],
 		...outcomes.map(outcome => ({
 			name: outcome.call.name,
 			ok: outcome.ok,

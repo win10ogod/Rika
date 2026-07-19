@@ -3,12 +3,13 @@ import path from 'node:path'
 
 import JSZip from 'npm:jszip'
 
-import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '../../scripts/achievement-triggers.mjs'
-import { DiscordBotMain, GetBotConfigTemplate as GetDiscordBotConfigTemplate } from '../../interfaces/discord/index.mjs'
-import { TelegramBotMain, GetBotConfigTemplate as GetTelegramBotConfigTemplate } from '../../interfaces/telegram/index.mjs'
 import { SkillsPrompt } from '../../prompt/functions/skills.mjs'
+import { mergeChatLogEntries } from '../../reply_gener/utils.mjs'
+import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '../../scripts/achievement-triggers.mjs'
 import { discoverSkills, formatSkillsCatalog, readSkill, readSkillResource } from '../../scripts/skills.mjs'
 import { parseSubAgentCalls } from '../../scripts/sub-agent.mjs'
+import { handleOwnerCommands } from '../../trigger/commands.mjs'
+import { detectMentionedWithoutAt } from '../../trigger/helpers.mjs'
 
 /* global fountCharCI */
 const CI = fountCharCI
@@ -25,47 +26,46 @@ await CI.test('Setup AI Source', async () => {
 	})
 })
 
-CI.test('Platform Integration Contracts', async () => {
+CI.test('Together Shell Contracts', async () => {
 	for (const interfaceName of ['telegram', 'discord', 'shellassist', 'browserIntegration', 'timers'])
 		CI.assert(!!CI.char.interfaces[interfaceName], `character interface is missing: ${interfaceName}`)
+	for (const methodName of ['OnMessage', 'OnGroupEvent'])
+		CI.assert(typeof CI.char.interfaces.chat[methodName] === 'function', `together chat method is missing: ${methodName}`)
+	CI.assert(typeof CI.char.OnError === 'function', 'together top-level OnError is missing')
+	CI.assert(typeof CI.char.interfaces.telegram.stickers === 'object', 'Telegram sticker contract is missing')
+	CI.assert(typeof CI.char.interfaces.discord.stickers === 'object', 'Discord sticker contract is missing')
 
-	const telegramConfig = GetTelegramBotConfigTemplate()
-	for (const field of ['OwnerUserID', 'OwnerUserName', 'OwnerNameKeywords', 'MediaGroupFlushMs'])
-		CI.assert(Object.hasOwn(telegramConfig, field), `Telegram config field is missing: ${field}`)
-	const telegramEvents = new Map()
-	const telegramBot = {
-		telegram: {
-			getMe: () => Promise.resolve({ id: 1001, first_name: '理華', username: 'rika_ci_bot', is_bot: true })
-		},
-		on: (event, handler) => telegramEvents.set(event, handler)
-	}
-	const telegramAPI = await TelegramBotMain(telegramBot, telegramConfig)
-	CI.assert(telegramAPI.name === 'telegram', 'Telegram platform API was not registered')
-	for (const event of ['message', 'edited_message', 'my_chat_member', 'chat_member'])
-		CI.assert(telegramEvents.has(event), `Telegram event handler is missing: ${event}`)
+	const fountConfig = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'fount.json'), 'utf8'))
+	for (const registry of ['locales', 'achievements'])
+		CI.assert(Array.isArray(fountConfig.registries?.[registry]), `fount registry is missing: ${registry}`)
 
-	const discordConfig = GetDiscordBotConfigTemplate()
-	for (const field of ['OwnerUserName', 'OwnerDiscordID', 'OwnerNameKeywords', 'BotActivityName', 'BotActivityType'])
-		CI.assert(Object.hasOwn(discordConfig, field), `Discord config field is missing: ${field}`)
-	const discordEvents = new Map()
-	const discordClient = {
-		user: {
-			id: '2001',
-			username: 'rika_ci_bot',
-			displayName: '理華',
-			setPresence: () => undefined
-		},
-		guilds: { cache: new Map() },
-		users: {
-			cache: new Map(),
-			fetch: id => Promise.resolve({ id, username: discordConfig.OwnerUserName })
-		},
-		on: (event, handler) => discordEvents.set(event, handler)
+	CI.assert(detectMentionedWithoutAt('理華，我需要你'), 'traditional Chinese name mention was not detected')
+	CI.assert(detectMentionedWithoutAt('rika, help me'), 'English name mention was not detected')
+	const replies = []
+	/** @param {object} payload 被命令直接回覆的訊息。 */
+	async function captureReply(payload) {
+		replies.push(payload)
 	}
-	const discordAPI = await DiscordBotMain(discordClient, discordConfig)
-	CI.assert(discordAPI.name === 'discord', 'Discord platform API was not registered')
-	for (const event of ['messageCreate', 'typingStart', 'messageUpdate', 'messageDelete', 'guildCreate', 'guildMemberRemove'])
-		CI.assert(discordEvents.has(event), `Discord event handler is missing: ${event}`)
+	const commandResult = await handleOwnerCommands({
+		content: '理華復誦\n```\nTOGETHER_REPEAT_OK\n```',
+		memory: {},
+		message: { reply: captureReply },
+		client: {},
+		groupId: 'ci-group',
+		channelId: 'ci-channel',
+		isFromOwner: true,
+		platform: 'chat',
+		username: 'CI-user',
+	})
+	CI.assert(commandResult === 'handled', `owner repeat command was not handled: ${commandResult}`)
+	CI.assert(replies[0]?.content === 'TOGETHER_REPEAT_OK', 'owner repeat command returned the wrong content')
+
+	const merged = mergeChatLogEntries([
+		{ name: '作者', content: '第一段', time_stamp: 1000, files: [], extension: { platform_message_ids: ['1'] } },
+		{ name: '作者', content: '第二段', time_stamp: 2000, files: [], extension: { platform_message_ids: ['2'] } },
+	], 180_000)
+	CI.assert(merged.length === 1 && merged[0].content.includes('第一段\n第二段'), 'bridge message merge contract failed')
+	CI.assert(merged[0].extension.platform_message_ids.length === 2, 'bridge message ids were lost while merging')
 })
 
 CI.test('Sub-Agent Parser', () => {
@@ -266,6 +266,10 @@ CI.test('Role Setting Filter', async () => {
 
 CI.test('Monitoring Capability Wiring', () => {
 	const charRoot = path.join(import.meta.dirname, '..', '..')
+	/**
+	 * @param {string} relativePath 角色根目錄下的相對路徑。
+	 * @returns {string} 檔案文字。
+	 */
 	const read = relativePath => fs.readFileSync(path.join(charRoot, relativePath), 'utf8')
 	const main = read('main.mjs')
 	const functionIndex = read('prompt/functions/index.mjs')

@@ -82,6 +82,7 @@ async function getAISuggestionForError(error, errorMessageForRecord, originalArg
  * @returns {Promise<FountChatReply_t>} 一个包含错误报告的回复对象。
  */
 export async function handleError(error, originalArgs) {
+	// 故意保留 debugger，方便在本地檢查原始堆疊與請求上下文。
 	debugger
 	const errorStack = error.stack || error.message
 	if (!errorStack) console.trace('Error has no stack:', error)
@@ -99,10 +100,11 @@ export async function handleError(error, originalArgs) {
 	}
 	catch (anotherError) {
 		const anotherErrorStack = anotherError.stack || anotherError.message
+		const noIdeaText = '沒有足夠資訊產生可靠的修復方案。'
 		if (`${error.name}: ${error.message}` === `${anotherError.name}: ${anotherError.message}`)
-			aiSuggestionReply = { content: '沒有足夠資訊產生可靠的修復方案。' }
-
-		aiSuggestionReply = { content: '```\n' + anotherErrorStack + '\n```\n自動診斷失敗，請根據原始錯誤繼續排查。' }
+			aiSuggestionReply = { content: noIdeaText }
+		else
+			aiSuggestionReply = { content: '```\n' + anotherErrorStack + '\n```\n' + noIdeaText }
 	}
 
 	let fullReplyContent = errorMessageForRecord + '\n' + (aiSuggestionReply?.content || '')
@@ -118,4 +120,50 @@ export async function handleError(error, originalArgs) {
 		files: aiSuggestionReply?.files || [],
 		extension: { is_error_report: true },
 	}
+}
+
+/**
+ * 處理 fount 新版角色頂層錯誤，並將診斷報告送回來源頻道。
+ * @param {Error} error 錯誤
+ * @param {{ username: string, source: string, groupId?: string, channelId?: string, charname?: string }} context 錯誤上下文
+ * @param {string} selfEntityHash 理華的 acting entityHash
+ * @returns {Promise<boolean>} 是否已處理
+ */
+export async function handleCharTopLevelError(error, context, selfEntityHash) {
+	const errorStack = error.stack || error.message
+	if (!errorStack) console.trace('Error has no stack:', error)
+	const errorMessageForRecord = `\`\`\`\n${errorStack}\n\`\`\`\n`
+	if (errorRecord[errorMessageForRecord]) return true
+
+	/** @type {FountChatReplyRequest_t} */
+	let originalArgs
+	if (context.groupId && context.charname) {
+		const { getChatRequest } = await import('../../../../../../src/public/parts/shells/chat/src/chat/session/chatRequest.mjs')
+		originalArgs = await getChatRequest(
+			context.groupId,
+			context.charname,
+			context.channelId || 'default',
+			{ replicaUsername: context.username },
+		)
+	}
+	else
+		originalArgs = {
+			username: context.username,
+			char_id: BotCharname,
+			Charname: BotCharname,
+			UserCharname: context.username,
+			chat_scoped_char_memory: {},
+			chat_log: [],
+		}
+
+	const report = await handleError(error, originalArgs)
+	if (context.groupId && context.channelId && report?.content) {
+		const { getChatClient } = await import('../../../../../../src/public/parts/shells/chat/src/api/client/index.mjs')
+		const client = await getChatClient(context.username, selfEntityHash)
+		const channel = await client.group(context.groupId).then(group => group.channel(context.channelId))
+		await channel.send({ content: report.content, files: report.files || [] })
+	}
+
+	console.error(`[Rika OnError/${context.source}]`, error, context)
+	return true
 }

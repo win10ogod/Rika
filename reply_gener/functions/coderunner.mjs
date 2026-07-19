@@ -10,7 +10,7 @@ import {
 	getChatI18n,
 	renderMarkdownCodeBlock,
 	renderMarkdownInlineCode
-} from '../../../../../../../src/public/parts/shells/chat/src/stream.mjs'
+} from '../../../../../../../src/public/parts/shells/chat/src/streaming/index.mjs'
 import { unlockAchievement } from '../../scripts/achievements.mjs'
 import { toFileObj } from '../../scripts/fileobj.mjs'
 import { newCharReply, statisticDatas } from '../../scripts/statistics.mjs'
@@ -54,7 +54,7 @@ ${code}
 		if (!reply) return
 		reply.logContextBefore.push(feedback)
 		await logger({ name: '理華', ...reply })
-		newCharReply(reply.content, args.extension?.platform || 'chat')
+		newCharReply(reply.content, args.extension?.bridge?.platform || 'chat')
 	}
 	catch (error) {
 		console.error(`Error processing callback for "${reason}":`, error)

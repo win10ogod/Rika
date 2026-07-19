@@ -2,10 +2,14 @@ import process from 'node:process'
 
 import { compareTwoStrings as string_similarity } from 'npm:string-similarity'
 
-import { buildPromptStruct } from '../../../../../../src/public/parts/shells/chat/src/prompt_struct.mjs'
+import {
+	findTriggerChatLogEntry,
+	hydrateBridgeNativeContext,
+} from '../../../../../../src/public/parts/shells/chat/src/chat/lib/codeBridgeContext.mjs'
+import { buildPromptStruct } from '../../../../../../src/public/parts/shells/chat/src/prompt_struct/index.mjs'
 import {
 	defineToolUseBlocks,
-} from '../../../../../../src/public/parts/shells/chat/src/stream.mjs'
+} from '../../../../../../src/public/parts/shells/chat/src/streaming/index.mjs'
 import { noAISourceAvailable, OrderedAISourceCalling, StrictAISourceCalling } from '../AISource/index.mjs'
 import { is_dist } from '../charbase.mjs'
 import { plugins } from '../config/index.mjs'
@@ -17,6 +21,7 @@ import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '..
 import { unlockAchievement } from '../scripts/achievements.mjs'
 import { addNotifyAbleChannel } from '../scripts/notify.mjs'
 import { newCharReply, newUserMessage, saveStatisticDatas, statisticDatas } from '../scripts/statistics.mjs'
+import { MergeMessagePeriodMs } from '../trigger/constants.mjs'
 
 import { handleError } from './error.mjs'
 import { browserIntegration } from './functions/browserIntegration.mjs'
@@ -36,6 +41,7 @@ import { timer } from './functions/timer.mjs'
 import { webbrowse } from './functions/webbrowse.mjs'
 import { websearch } from './functions/websearch.mjs'
 import { noAIreply } from './noAI/index.mjs'
+import { mergeChatLogEntries } from './utils.mjs'
 
 /** @typedef {import("../../../../../../src/public/parts/shells/chat/decl/chatLog.ts").chatLogEntry_t} chatLogEntry_t */
 /** @typedef {import("../../../../../../src/public/parts/shells/chat/decl/chatLog.ts").chatReplyRequest_t} chatReplyRequest_t */
@@ -102,23 +108,34 @@ export async function baseGetReply(args) {
 		extension: {},
 	}
 	if (!args.extension?.ai_source_override && noAISourceAvailable()) return Object.assign(result, noAIreply(args))
-	// 注入角色插件
+	// 延續舊平台接入的 180 秒同人訊息合併語義。
+	args.chat_log = mergeChatLogEntries(args.chat_log, MergeMessagePeriodMs)
+	// 新版 fount 由 shell bridge 管理 TG/DC；只為目前橋接平台注入原生 API 上下文。
+	const platformPlugins = {}
+	if (!args.extension?.is_sub_agent) {
+		const bridgePlatform = args.extension?.bridge?.platform
+		const groupId = args.extension?.groupId
+		const channelId = args.extension?.channelId
+		const triggerEntry = findTriggerChatLogEntry(args.chat_log)
+		let nativeContext = null
+		if (bridgePlatform && groupId && channelId && args.username)
+			nativeContext = await hydrateBridgeNativeContext(args.username, groupId, channelId, triggerEntry)
+		if (bridgePlatform === 'telegram')
+			platformPlugins.telegram_api = get_telegram_api_plugin(nativeContext)
+		else if (bridgePlatform === 'discord')
+			platformPlugins.discord_api = get_discord_api_plugin(nativeContext)
+	}
 	args.plugins = args.extension?.is_sub_agent
 		? Object.assign({}, args.plugins)
-		: Object.assign({}, plugins, args.plugins)
-	if (!args.extension?.is_sub_agent) {
-		args.plugins.telegram_api ??= await get_telegram_api_plugin()
-		args.plugins.discord_api ??= await get_discord_api_plugin()
-	}
+		: Object.assign({}, plugins, platformPlugins, args.plugins)
 	const prompt_struct = Object.assign(await buildPromptStruct(args), {
 		alternative_charnames: ['Rika', '理華', '理华']
 	})
 	const logical_results = await buildLogicalResults(args, prompt_struct, 0)
 	const AddLongTimeLog = getLongTimeLogAdder(result, prompt_struct)
 	const last_entry = args.chat_log.slice(-1)[0]
-	if (last_entry?.name == args.UserCharname && last_entry.role == 'user') {
-		newUserMessage(last_entry.content, args.extension?.platform || 'chat')
-	}
+	if (last_entry?.name == args.UserCharname && last_entry.role == 'user')
+		newUserMessage(last_entry.content, args.extension?.bridge?.platform || 'chat')
 	// 构建更新预览管线
 	args.generation_options ??= {}
 	const oriReplyPreviewUpdater = args.generation_options?.replyPreviewUpdater
@@ -207,6 +224,11 @@ export async function baseGetReply(args) {
 			logical_results.in_assist ? 'expert' : 'sfw'
 			: 'from-other')
 		let main_AIsource
+		/**
+		 * 呼叫選定來源並記錄本輪實際主模型，供未指定模型的子代理復用。
+		 * @param {object} AI AI 來源。
+		 * @returns {Promise<object>} 來源回覆。
+		 */
 		const callSource = async AI => {
 			main_AIsource = AI
 			const result = await AI.StructCall(prompt_struct, args.generation_options)
@@ -271,7 +293,7 @@ export async function baseGetReply(args) {
 		break
 	}
 	if (last_entry?.name == args.UserCharname && last_entry.role == 'user') {
-		newCharReply(result.content, args.extension?.platform || 'chat')
+		newCharReply(result.content, args.extension?.bridge?.platform || 'chat')
 		if (!statisticDatas.firstInteraction.time) {
 			statisticDatas.firstInteraction = {
 				time: Date.now(),
@@ -307,7 +329,17 @@ export async function GetReply(args) {
 	try {
 		if (!args.extension?.is_sub_agent && hasUserWithdrawnLoveFromRika(args))
 			await unlockAchievement('betrayer')
-		return await baseGetReply(args)
+		const memory = args.chat_scoped_char_memory
+		if (!args.extension?.is_sub_agent && memory?.fuyanMode)
+			return { content: '……嗯。' }
+		const result = await baseGetReply(args)
+		if (!result) return result
+		for (const bannedStr of memory?.bannedStrings || []) {
+			if (result.content_for_show != null)
+				result.content_for_show = result.content_for_show.replaceAll(bannedStr, '')
+			result.content = result.content.replaceAll(bannedStr, '')
+		}
+		return result
 	}
 	catch (error) {
 		console.error(`[ReplyGener] Error in GetReply for chat "${args.chat_name}":`, error)
