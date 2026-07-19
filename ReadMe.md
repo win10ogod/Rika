@@ -113,4 +113,16 @@ Write the complete workflow here.
 - 手動安裝：將本目錄放入 fount 的角色目錄，並以 `Rika` 作為技術目錄名稱載入；介面顯示名仍為「理華」。
 - 從 1.1.2 或更早版本升級時，請重新匯入安裝包，並在 Telegram／Discord Bot 設定中重新選擇「理華」。舊版本曾把顯示名「理華」誤當成技術 ID，會令 Windows 路由產生 `%25E7...` 的雙重編碼而無法載入角色。
 
+### Telegram 擁有者設定
+
+`OwnerUserID` 必須是 Telegram 的純數字 user ID（例如 `123456789`），不能填 `@username`。`OwnerUserName` 填不含 `@` 的帳號名稱，不是可含空格的顯示名稱；`OwnerNameKeywords` 則填作者的稱呼與別名，而不是理華自己的名字。`together` 分支由最新版 Telegram shell 注入連接器，角色不重複實作第二份連接器。
+
+```json
+{
+	"OwnerUserID": "123456789",
+	"OwnerUserName": "Zinwin10",
+	"OwnerNameKeywords": ["win 100", "Zinwin10"]
+}
+```
+
 維護者可在角色根目錄執行 `deno run --allow-read --allow-write .esh/commands/export-package.mjs`，產生安裝器可直接導入的 ZIP。此命令固定排除 `.git` 與 `fount.json` 中的 `data_files`，不再使用需要外部 7z 執行環境的格式。
