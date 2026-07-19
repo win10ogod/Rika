@@ -34,14 +34,15 @@ export async function NewBrowserGener(path, name) {
 
 /**
  * 根据浏览器名称创建一个 Puppeteer 启动器函数。
- * @param {string} name - 浏览器名称 ('firefox', 'chrome', etc.)。
+ * @param {string} name - 可执行文件名称（例如 'google-chrome'）。
+ * @param {'chrome' | 'firefox'} [browserName=name] - Puppeteer 使用的浏览器产品名称。
  * @returns {Promise<Function|null>} - 返回一个接受配置并启动 Puppeteer 的函数，如果找不到浏览器则返回 null。
  */
-export async function NewBrowserGenerByName(name) {
+export async function NewBrowserGenerByName(name, browserName = name) {
 	const path = await where_command(name) // 查找浏览器的可执行文件路径
 	if (!path) return null
 	// 返回一个函数，该函数接收配置并启动 Puppeteer
-	return NewBrowserGener(path, name)
+	return NewBrowserGener(path, browserName)
 }
 
 /**
@@ -51,16 +52,23 @@ export async function NewBrowserGenerByName(name) {
  * @throws {Error} 如果没有找到或无法启动任何支持的浏览器。
  */
 export async function NewBrowser(configs) {
-	const browserPriority = ['chrome', 'firefox']
-	for (const name of browserPriority) {
-		const generator = await NewBrowserGenerByName(name) // 获取对应浏览器的启动器
+	const browserPriority = [
+		{ executable: 'chrome', browser: 'chrome' },
+		{ executable: 'google-chrome', browser: 'chrome' },
+		{ executable: 'google-chrome-stable', browser: 'chrome' },
+		{ executable: 'chromium', browser: 'chrome' },
+		{ executable: 'chromium-browser', browser: 'chrome' },
+		{ executable: 'firefox', browser: 'firefox' },
+	]
+	for (const { executable, browser: browserName } of browserPriority) {
+		const generator = await NewBrowserGenerByName(executable, browserName) // 获取对应浏览器的启动器
 		if (generator) try {
 			const browser = await generator(configs) // 尝试使用启动器启动浏览器
-			console.info(`Successfully launched browser: ${name}`)
+			console.info(`Successfully launched browser: ${executable}`)
 			return browser // 成功则返回浏览器实例
 		}
 		catch (error) {
-			console.warn(`Failed to launch ${name}: ${error.stack}. Trying next browser.`)
+			console.warn(`Failed to launch ${executable}: ${error.stack}. Trying next browser.`)
 		}
 	}
 	try {
@@ -76,7 +84,7 @@ export async function NewBrowser(configs) {
 		console.warn(`Failed to launch Edge: ${error.stack}.`)
 	}
 
-	throw new Error('Failed to launch any supported browser (Chrome, Firefox or Edge).')
+	throw new Error('Failed to launch any supported browser (Chrome, Chromium, Firefox or Edge).')
 }
 
 /**
