@@ -76,7 +76,7 @@ async function generateDepartureMessage(event, channelHistoryForAI) {
 		ReplyToCharname: '',
 		locales: localhostLocales,
 		time: new Date(),
-		world: null,
+		world: await loadAnyPreferredDefaultPart(FountUsername, 'worlds'),
 		user: await loadAnyPreferredDefaultPart(FountUsername, 'personas'),
 		char: Rika,
 		other_chars: [],

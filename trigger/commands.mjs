@@ -58,9 +58,10 @@ export async function handleOwnerCommands({
 	}
 	const repeatMatch = content.match(/^理[華华].{0,2}(?:復誦|复诵).{0,2}\s*(?<backticks>`+)[^\n]*\n(?<repeat_content>[\S\s]*?)\k<backticks>\s*$/)
 	if (repeatMatch?.groups?.repeat_content) {
-		await message.reply({ content: repeatMatch.groups.repeat_content })
+		const repeatContent = repeatMatch.groups.repeat_content.replace(/\r?\n$/, '')
+		await message.reply({ content: repeatContent })
 		newUserMessage(content, platform)
-		newCharReply(repeatMatch.groups.repeat_content, platform)
+		newCharReply(repeatContent, platform)
 		return 'handled'
 	}
 	const banWordMatch = content.match(/^理[華华].{0,2}禁止.{0,2}`(?<banned_content>[\S\s]*)`$/)

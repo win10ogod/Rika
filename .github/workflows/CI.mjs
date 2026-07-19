@@ -48,6 +48,8 @@ CI.test('Together Shell Contracts', async () => {
 		CI.assert(!fs.existsSync(path.join(charRoot, legacyConnector)), `legacy character connector must not shadow the together shell: ${legacyConnector}`)
 	const achievementsSource = fs.readFileSync(path.join(charRoot, 'scripts', 'achievements.mjs'), 'utf8')
 	CI.assert(!/onPartInstalled|registerAchievements/.test(achievementsSource), 'character load must not repeat the part-install lifecycle')
+	const groupGuardSource = fs.readFileSync(path.join(charRoot, 'trigger', 'groupGuard.mjs'), 'utf8')
+	CI.assert(!/world:\s*null/.test(groupGuardSource), 'latest together prompt requests require a world part')
 
 	CI.assert(detectMentionedWithoutAt('理華，我需要你'), 'traditional Chinese name mention was not detected')
 	CI.assert(detectMentionedWithoutAt('rika, help me'), 'English name mention was not detected')
@@ -105,7 +107,7 @@ CI.test('Installer-Compatible ZIP Export', async () => {
 	CI.assert(!!zip.file('fount.json'), 'exported ZIP is missing fount.json at archive root')
 	CI.assert(!!zip.file('main.mjs'), 'exported ZIP is missing main.mjs at archive root')
 	CI.assert(!!zip.file('skills/software-engineering/SKILL.md'), 'exported ZIP is missing character-native Skills')
-	for (const excluded of ['memory/', 'vars/', 'dist/', '.git/'])
+	for (const excluded of ['memory/', 'vars/', 'dist/', '.git/', '.ci-workspaces/'])
 		CI.assert(!Object.keys(zip.files).some(file => file === excluded || file.startsWith(excluded)), `exported ZIP contains excluded path: ${excluded}`)
 })
 

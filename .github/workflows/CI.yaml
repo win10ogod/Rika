@@ -24,6 +24,66 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: steve02081504/fount-charCI@master
+      - name: Checkout Rika
+        uses: actions/checkout@v4
+
+      - name: Checkout fount-charCI
+        uses: actions/checkout@v4
         with:
-          CI-filepath: .github/workflows/CI.mjs
+          repository: steve02081504/fount-charCI
+          path: .ci/fount-charCI
+
+      - name: Checkout fount together
+        uses: actions/checkout@v4
+        with:
+          repository: steve02081504/fount
+          ref: together
+          path: .ci/fount-charCI/fount
+
+      - name: Prepare character fixture
+        shell: bash
+        run: |
+          export CI_ROOT="$GITHUB_WORKSPACE/.ci/fount-charCI"
+          FOUNT_ROOT="$CI_ROOT/fount"
+          CHAR_ROOT="$FOUNT_ROOT/.vm_data_charCI/users/CI-user/chars/理華"
+          node - <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const replacements = [
+            [
+              path.join(process.env.CI_ROOT, 'default_data/users/CI-user/serviceGenerators/AI/CI/main.mjs'),
+              'shells/chat/src/prompt_struct.mjs',
+              'shells/chat/src/prompt_struct/index.mjs',
+            ],
+            [
+              path.join(process.env.CI_ROOT, 'src/fount.mjs'),
+              'world: null, char, user: null',
+              'world: { interfaces: { chat: {} } }, char, user: { interfaces: { chat: {} } }',
+            ],
+          ]
+          for (const [file, before, after] of replacements) {
+            const source = fs.readFileSync(file, 'utf8')
+            if (!source.includes(before)) throw new Error(`fount-charCI compatibility target changed: ${file}`)
+            fs.writeFileSync(file, source.replace(before, after))
+          }
+          NODE
+          cp -R "$CI_ROOT/default_data" "$FOUNT_ROOT/.vm_data_charCI"
+          mkdir -p "$CHAR_ROOT" "$FOUNT_ROOT/.vm_data_charCI/users/CI-user/settings"
+          git archive HEAD | tar -x -C "$CHAR_ROOT"
+          echo "CI_ROOT=$CI_ROOT" >> "$GITHUB_ENV"
+          echo "GITHUB_ACTION_PATH=$CI_ROOT" >> "$GITHUB_ENV"
+          echo "CI_username=CI-user" >> "$GITHUB_ENV"
+          echo "CI_charname=理華" >> "$GITHUB_ENV"
+
+      - name: Setup latest Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: latest
+
+      - name: Run character CI against fount together
+        shell: bash
+        run: >-
+          deno run --allow-scripts --allow-all --unstable-npm-lazy-caching
+          -c "$CI_ROOT/fount/deno.json"
+          "$CI_ROOT/index.mjs"
+          .github/workflows/CI.mjs
