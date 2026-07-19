@@ -36,9 +36,27 @@ CI.test('Platform Integration Contracts', async () => {
 	CI.assert(typeof CI.char.interfaces.telegram.BotSetup === 'function', 'mainline Telegram BotSetup is missing')
 	CI.assert(typeof CI.char.interfaces.discord.OnceClientReady === 'function', 'mainline Discord OnceClientReady is missing')
 
-	const telegramConfig = await CI.char.interfaces.telegram.GetBotConfigTemplate()
+	const telegramConfigTemplate = await CI.char.interfaces.telegram.GetBotConfigTemplate()
 	for (const field of ['OwnerUserID', 'OwnerUserName', 'OwnerNameKeywords', 'MediaGroupFlushMs'])
-		CI.assert(Object.hasOwn(telegramConfig, field), `Telegram config field is missing: ${field}`)
+		CI.assert(Object.hasOwn(telegramConfigTemplate, field), `Telegram config field is missing: ${field}`)
+	let invalidTelegramOwnerRejected = false
+	try {
+		await CI.char.interfaces.telegram.BotSetup({}, {
+			...telegramConfigTemplate,
+			OwnerUserID: '@Zinwin10',
+			OwnerUserName: 'win 100',
+		})
+	}
+	catch (error) {
+		invalidTelegramOwnerRejected = /numeric user ID/.test(error.message)
+	}
+	CI.assert(invalidTelegramOwnerRejected, 'Telegram must reject @username in OwnerUserID before reporting a successful login')
+	const telegramConfig = {
+		...telegramConfigTemplate,
+		OwnerUserID: '1002',
+		OwnerUserName: '@rika_ci_owner',
+		OwnerNameKeywords: ['CI owner', 'rika_ci_owner'],
+	}
 	const telegramEvents = new Map()
 	const telegramBot = {
 		telegram: {
@@ -54,6 +72,8 @@ CI.test('Platform Integration Contracts', async () => {
 	}
 	const telegramAPI = await CI.char.interfaces.telegram.BotSetup(telegramBot, telegramConfig)
 	CI.assert(telegramAPI.name === 'telegram', 'Telegram platform API was not registered')
+	CI.assert(telegramAPI.getOwnerUserId() === '1002', 'Telegram numeric owner ID was not retained')
+	CI.assert(telegramAPI.getOwnerUserName() === 'rika_ci_owner', 'Telegram owner username was not normalized')
 	for (const event of ['message', 'edited_message', 'my_chat_member', 'chat_member'])
 		CI.assert(telegramEvents.has(event), `Telegram event handler is missing: ${event}`)
 

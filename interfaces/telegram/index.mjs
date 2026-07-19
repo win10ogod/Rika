@@ -4,6 +4,7 @@ import { tryFewTimes } from '../../scripts/tryFewTimes.mjs'
 
 import { registerEventHandlers } from './event-handlers.mjs'
 import { buildPlatformAPI } from './platform-api.mjs'
+import { validateTelegramInterfaceConfig } from './config.mjs'
 import { setTelegrafInstance, setTelegramBotInfo, telegramBotInfo, telegramUserIdToDisplayName, telegramDisplayNameToId } from './state.mjs'
 
 /**
@@ -33,6 +34,7 @@ export let telegramPlatformAPI = null
  * @returns {Promise<import('../../bot_core/index.mjs').PlatformAPI_t>} - 返回构建的平台 API 实例。
  */
 export async function TelegramBotMain(bot, interfaceConfig) {
+	interfaceConfig = validateTelegramInterfaceConfig(interfaceConfig)
 	setTelegrafInstance(bot)
 	try {
 		const botInfo = await tryFewTimes(() => bot.telegram.getMe())
