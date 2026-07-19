@@ -1,5 +1,4 @@
 import crypto from 'node:crypto'
-import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 
@@ -7,9 +6,15 @@ import JSZip from 'npm:jszip'
 
 const characterRoot = path.resolve(import.meta.dirname, '..', '..')
 const fountJson = JSON.parse(await fsp.readFile(path.join(characterRoot, 'fount.json'), 'utf8'))
-const excludedTopLevel = new Set(['.git', ...(fountJson.data_files || [])])
+const dataFiles = fountJson.data_files || []
+const excludedTopLevel = new Set(['.git', '.ci-workspaces', ...dataFiles])
 const zip = new JSZip()
 
+/**
+ * @param {string} directory 目前要收集的目錄。
+ * @param {string} relativeDirectory ZIP 內的相對目錄。
+ * @returns {Promise<void>}
+ */
 async function addDirectory(directory, relativeDirectory = '') {
 	for (const entry of (await fsp.readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
 		if (!relativeDirectory && excludedTopLevel.has(entry.name)) continue

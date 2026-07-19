@@ -3,10 +3,8 @@ import path from 'node:path'
 
 import JSZip from 'npm:jszip'
 
-import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '../../scripts/achievement-triggers.mjs'
-import { DiscordBotMain, GetBotConfigTemplate as GetDiscordBotConfigTemplate } from '../../interfaces/discord/index.mjs'
-import { TelegramBotMain, GetBotConfigTemplate as GetTelegramBotConfigTemplate } from '../../interfaces/telegram/index.mjs'
 import { SkillsPrompt } from '../../prompt/functions/skills.mjs'
+import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '../../scripts/achievement-triggers.mjs'
 import { discoverSkills, formatSkillsCatalog, readSkill, readSkillResource } from '../../scripts/skills.mjs'
 import { parseSubAgentCalls } from '../../scripts/sub-agent.mjs'
 
@@ -28,23 +26,34 @@ await CI.test('Setup AI Source', async () => {
 CI.test('Platform Integration Contracts', async () => {
 	for (const interfaceName of ['telegram', 'discord', 'shellassist', 'browserIntegration', 'timers'])
 		CI.assert(!!CI.char.interfaces[interfaceName], `character interface is missing: ${interfaceName}`)
+	const platformInterfaces = Object.keys(CI.char.interfaces)
+		.filter(name => /^(telegram|telegrambot|discord|discordbot)$/i.test(name))
+	CI.assert(platformInterfaces.join(',') === 'telegram,discord', `duplicate platform interfaces would create duplicate configuration icons: ${platformInterfaces.join(',')}`)
+	CI.assert(typeof CI.char.interfaces.telegram.BotSetup === 'function', 'mainline Telegram BotSetup is missing')
+	CI.assert(typeof CI.char.interfaces.discord.OnceClientReady === 'function', 'mainline Discord OnceClientReady is missing')
 
-	const telegramConfig = GetTelegramBotConfigTemplate()
+	const telegramConfig = await CI.char.interfaces.telegram.GetBotConfigTemplate()
 	for (const field of ['OwnerUserID', 'OwnerUserName', 'OwnerNameKeywords', 'MediaGroupFlushMs'])
 		CI.assert(Object.hasOwn(telegramConfig, field), `Telegram config field is missing: ${field}`)
 	const telegramEvents = new Map()
 	const telegramBot = {
 		telegram: {
+			/** @returns {Promise<object>} 模擬 Telegram 機器人資訊。 */
 			getMe: () => Promise.resolve({ id: 1001, first_name: '理華', username: 'rika_ci_bot', is_bot: true })
 		},
+		/**
+		 * @param {string} event 事件名。
+		 * @param {Function} handler 處理器。
+		 * @returns {Map<string, Function>} 事件表。
+		 */
 		on: (event, handler) => telegramEvents.set(event, handler)
 	}
-	const telegramAPI = await TelegramBotMain(telegramBot, telegramConfig)
+	const telegramAPI = await CI.char.interfaces.telegram.BotSetup(telegramBot, telegramConfig)
 	CI.assert(telegramAPI.name === 'telegram', 'Telegram platform API was not registered')
 	for (const event of ['message', 'edited_message', 'my_chat_member', 'chat_member'])
 		CI.assert(telegramEvents.has(event), `Telegram event handler is missing: ${event}`)
 
-	const discordConfig = GetDiscordBotConfigTemplate()
+	const discordConfig = await CI.char.interfaces.discord.GetBotConfigTemplate()
 	for (const field of ['OwnerUserName', 'OwnerDiscordID', 'OwnerNameKeywords', 'BotActivityName', 'BotActivityType'])
 		CI.assert(Object.hasOwn(discordConfig, field), `Discord config field is missing: ${field}`)
 	const discordEvents = new Map()
@@ -53,16 +62,28 @@ CI.test('Platform Integration Contracts', async () => {
 			id: '2001',
 			username: 'rika_ci_bot',
 			displayName: '理華',
+			/**
+			 * @returns {undefined} 模擬 Discord 狀態設定。
+			 */
 			setPresence: () => undefined
 		},
 		guilds: { cache: new Map() },
 		users: {
 			cache: new Map(),
+			/**
+			 * @param {string} id 使用者 ID。
+			 * @returns {Promise<object>} 模擬使用者。
+			 */
 			fetch: id => Promise.resolve({ id, username: discordConfig.OwnerUserName })
 		},
+		/**
+		 * @param {string} event 事件名。
+		 * @param {Function} handler 處理器。
+		 * @returns {Map<string, Function>} 事件表。
+		 */
 		on: (event, handler) => discordEvents.set(event, handler)
 	}
-	const discordAPI = await DiscordBotMain(discordClient, discordConfig)
+	const discordAPI = await CI.char.interfaces.discord.OnceClientReady(discordClient, discordConfig)
 	CI.assert(discordAPI.name === 'discord', 'Discord platform API was not registered')
 	for (const event of ['messageCreate', 'typingStart', 'messageUpdate', 'messageDelete', 'guildCreate', 'guildMemberRemove'])
 		CI.assert(discordEvents.has(event), `Discord event handler is missing: ${event}`)
@@ -95,7 +116,7 @@ CI.test('Installer-Compatible ZIP Export', async () => {
 	CI.assert(!!zip.file('fount.json'), 'exported ZIP is missing fount.json at archive root')
 	CI.assert(!!zip.file('main.mjs'), 'exported ZIP is missing main.mjs at archive root')
 	CI.assert(!!zip.file('skills/software-engineering/SKILL.md'), 'exported ZIP is missing character-native Skills')
-	for (const excluded of ['memory/', 'vars/', 'dist/', '.git/'])
+	for (const excluded of ['memory/', 'vars/', 'dist/', '.git/', '.ci-workspaces/'])
 		CI.assert(!Object.keys(zip.files).some(file => file === excluded || file.startsWith(excluded)), `exported ZIP contains excluded path: ${excluded}`)
 })
 
@@ -266,6 +287,10 @@ CI.test('Role Setting Filter', async () => {
 
 CI.test('Monitoring Capability Wiring', () => {
 	const charRoot = path.join(import.meta.dirname, '..', '..')
+	/**
+	 * @param {string} relativePath 相對路徑。
+	 * @returns {string} 檔案內容。
+	 */
 	const read = relativePath => fs.readFileSync(path.join(charRoot, relativePath), 'utf8')
 	const main = read('main.mjs')
 	const functionIndex = read('prompt/functions/index.mjs')
