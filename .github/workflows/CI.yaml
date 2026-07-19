@@ -44,7 +44,11 @@ jobs:
         shell: bash
         run: |
           export CI_ROOT="$GITHUB_WORKSPACE/.ci/fount-charCI"
-          FOUNT_ROOT="$CI_ROOT/fount"
+          CI_ROOT_SHELL="$CI_ROOT"
+          if command -v cygpath >/dev/null 2>&1; then
+            CI_ROOT_SHELL="$(cygpath -u "$CI_ROOT")"
+          fi
+          FOUNT_ROOT="$CI_ROOT_SHELL/fount"
           CHAR_ROOT="$FOUNT_ROOT/.vm_data_charCI/users/CI-user/chars/理華"
           node - <<'NODE'
           const fs = require('node:fs')
@@ -71,6 +75,7 @@ jobs:
           mkdir -p "$CHAR_ROOT" "$FOUNT_ROOT/.vm_data_charCI/users/CI-user/settings"
           git archive HEAD | tar -x -C "$CHAR_ROOT"
           echo "CI_ROOT=$CI_ROOT" >> "$GITHUB_ENV"
+          echo "CI_ROOT_SHELL=$CI_ROOT_SHELL" >> "$GITHUB_ENV"
           echo "GITHUB_ACTION_PATH=$CI_ROOT" >> "$GITHUB_ENV"
           echo "CI_username=CI-user" >> "$GITHUB_ENV"
           echo "CI_charname=理華" >> "$GITHUB_ENV"
@@ -84,6 +89,6 @@ jobs:
         shell: bash
         run: >-
           deno run --allow-scripts --allow-all --unstable-npm-lazy-caching
-          -c "$CI_ROOT/fount/deno.json"
-          "$CI_ROOT/index.mjs"
+          -c "$CI_ROOT_SHELL/fount/deno.json"
+          "$CI_ROOT_SHELL/index.mjs"
           .github/workflows/CI.mjs
