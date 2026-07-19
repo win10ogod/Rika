@@ -24,6 +24,10 @@ await CI.test('Setup AI Source', async () => {
 })
 
 CI.test('Platform Integration Contracts', async () => {
+	const charRoot = path.join(import.meta.dirname, '..', '..')
+	const fountConfig = JSON.parse(fs.readFileSync(path.join(charRoot, 'fount.json'), 'utf8'))
+	CI.assert(fountConfig.dirname === 'Rika', `character technical ID must remain Rika: ${fountConfig.dirname}`)
+	CI.assert(encodeURIComponent(fountConfig.dirname) === fountConfig.dirname, `character technical ID must be URL-safe: ${fountConfig.dirname}`)
 	for (const interfaceName of ['telegram', 'discord', 'shellassist', 'browserIntegration', 'timers'])
 		CI.assert(!!CI.char.interfaces[interfaceName], `character interface is missing: ${interfaceName}`)
 	const platformInterfaces = Object.keys(CI.char.interfaces)
@@ -116,6 +120,9 @@ CI.test('Installer-Compatible ZIP Export', async () => {
 	CI.assert(!!zip.file('fount.json'), 'exported ZIP is missing fount.json at archive root')
 	CI.assert(!!zip.file('main.mjs'), 'exported ZIP is missing main.mjs at archive root')
 	CI.assert(!!zip.file('skills/software-engineering/SKILL.md'), 'exported ZIP is missing character-native Skills')
+	const packagedManifest = JSON.parse(await zip.file('fount.json').async('string'))
+	CI.assert(packagedManifest.dirname === 'Rika', `exported ZIP has the wrong technical ID: ${packagedManifest.dirname}`)
+	CI.assert(encodeURIComponent(packagedManifest.dirname) === packagedManifest.dirname, `exported ZIP technical ID is not URL-safe: ${packagedManifest.dirname}`)
 	for (const excluded of ['memory/', 'vars/', 'dist/', '.git/', '.ci-workspaces/'])
 		CI.assert(!Object.keys(zip.files).some(file => file === excluded || file.startsWith(excluded)), `exported ZIP contains excluded path: ${excluded}`)
 })
@@ -212,7 +219,7 @@ CI.test('Rika Achievement Design', async () => {
 	const achievementData = JSON.parse(fs.readFileSync(
 		path.join(charRoot, '..', '..', 'shells', 'achievements', 'data.json'),
 		'utf8'
-	)).unlocked?.['chars/理華']
+	)).unlocked?.['chars/Rika']
 	for (const id of ['installed', 'first_reply', 'betrayer', 'meet_gentian_aphrodite', 'psychological_mirror', 'use_skill'])
 		CI.assert(!!achievementData?.[id], `achievement did not unlock through its runtime path: ${id}`)
 })

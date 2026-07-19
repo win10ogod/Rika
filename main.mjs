@@ -34,7 +34,7 @@ Object.assign(Rika, {
 		await checkAndBackupDir('vars')
 		loadStatisticDatasFromDisk()
 		Rika.info = await UpdateInfo()
-		addPartLocaleData(username, 'chars/理華', ['zh-CN', 'en-US'], locale => loadJsonFile(chardir + `/locales/${locale}.json`))
+		addPartLocaleData(username, 'chars/Rika', ['zh-CN', 'en-US'], locale => loadJsonFile(chardir + `/locales/${locale}.json`))
 		await registerAchievements()
 		await unlockAchievement('installed')
 		initializeOnIdleHandler()
