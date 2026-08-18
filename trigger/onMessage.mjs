@@ -2,6 +2,7 @@ import { setCared } from '../../../../../../src/public/parts/shells/chat/src/cha
 import { resolveOperatorEntityHash } from '../../../../../../src/public/parts/shells/chat/src/chat/lib/replica.mjs'
 import { resolveDeclaredOwnerEntityHash } from '../../../../../../src/public/parts/shells/chat/src/entity/master.mjs'
 import { ensureLocalAgentEntityHash } from '../../../../../../src/public/parts/shells/chat/src/entity/member.mjs'
+import { charname as CHARNAME } from '../charbase.mjs'
 import { base_match_keys } from '../scripts/match.mjs'
 import { newUserMessage } from '../scripts/statistics.mjs'
 
@@ -14,8 +15,6 @@ import {
 } from './helpers.mjs'
 import { tryRepeatReply } from './repeat.mjs'
 import { shouldTriggerReply } from './scoring.mjs'
-
-const CHARNAME = '理華'
 
 /** @type {string} */
 let selfEntityHash = ''

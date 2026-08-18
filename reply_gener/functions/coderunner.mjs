@@ -433,8 +433,13 @@ export function GetCoderunnerPreviewUpdater() {
 	}
 
 	const toolDefs = [
-		['inline-js', '<inline-js>', '</inline-js>', async (code) => {
-			const coderesult = await async_eval(code, {})
+		['inline-js', '<inline-js>', '</inline-js>', async (code, args) => {
+			const memory = args?.chat_scoped_char_memory ?? {}
+			memory.coderunner_workspace ??= {}
+			const coderesult = await async_eval(code, {
+				workspace: memory.coderunner_workspace,
+				chat_log: args?.chat_log,
+			})
 			if (coderesult.error) throw coderesult.error
 			return coderesult.result + ''
 		}, renderInlineJsPending]
