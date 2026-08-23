@@ -33,11 +33,11 @@ jobs:
           repository: steve02081504/fount-charCI
           path: .ci/fount-charCI
 
-      - name: Checkout fount together
+      - name: Checkout fount
         uses: actions/checkout@v4
         with:
           repository: steve02081504/fount
-          ref: together
+          ref: master
           path: .ci/fount-charCI/fount
 
       - name: Prepare character fixture
@@ -85,7 +85,7 @@ jobs:
         with:
           deno-version: latest
 
-      - name: Run character CI against fount together
+      - name: Run character CI against fount
         shell: bash
         run: >-
           deno run --allow-scripts --allow-all --unstable-npm-lazy-caching
