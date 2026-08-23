@@ -81,6 +81,24 @@ jobs:
 
           if (!read_ci_file('default_data/users/CI-user/serviceGenerators/AI/CI/main.mjs').includes('shells/chat/src/prompt_struct'))
           	throw new Error('fount-charCI AI source lost its prompt_struct import')
+
+          // deno#36597: node-datachannel@0.33.1 lists an optional native binary
+          // (@node-datachannel/android-arm64@0.33.1) that was never published,
+          // so whole-graph resolution fails on every OS. Pin the bare specifier
+          // to the last fully published release until upstream heals.
+          const deno_config_relative = 'fount/deno.json'
+          let deno_config_text = read_ci_file(deno_config_relative)
+          if (!deno_config_text.includes('"npm:node-datachannel": "npm:node-datachannel@0.33.0"')) {
+          	try {
+          		const deno_config = JSON.parse(deno_config_text)
+          		deno_config.imports ??= {}
+          		deno_config.imports['npm:node-datachannel'] = 'npm:node-datachannel@0.33.0'
+          		deno_config_text = JSON.stringify(deno_config, null, '\t')
+          	} catch {
+          		deno_config_text = deno_config_text.replace('"imports": {', '"imports": {\n\t\t"npm:node-datachannel": "npm:node-datachannel@0.33.0",')
+          	}
+          	write_ci_file(deno_config_relative, deno_config_text)
+          }
           NODE
           cp -R "$CI_ROOT/default_data" "$FOUNT_ROOT/.vm_data_charCI"
           mkdir -p "$CHAR_ROOT" "$FOUNT_ROOT/.vm_data_charCI/users/CI-user/settings"
