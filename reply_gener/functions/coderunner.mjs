@@ -4,9 +4,9 @@ import util from 'node:util'
 import { async_eval } from 'npm:@steve02081504/async-eval'
 import { shell_exec_map } from 'npm:@steve02081504/exec'
 
+import { defineReplyHandler } from '../../../../../../../src/public/parts/shells/chat/src/reply/defineReplyHandler.mjs'
 import {
-	defineInlineToolUses,
-	defineToolUseBlocks,
+	defineReplyPreviews,
 	getChatI18n,
 	renderMarkdownCodeBlock,
 	renderMarkdownInlineCode
@@ -20,6 +20,19 @@ import { GetReply } from '../index.mjs'
 import { fountApiContext } from './fount-api.mjs'
 /** @typedef {import("../../../../../../../src/public/parts/shells/chat/decl/chatLog.ts").chatLogEntry_t} chatLogEntry_t */
 /** @typedef {import("../../../../../../../src/decl/prompt_struct.ts").prompt_struct_t} prompt_struct_t */
+
+/** Reuse stream-time evaluation only when it belongs to these exact completed calls. */
+async function readInlineResults(args, id, content) {
+	const matches = [...content.matchAll(new RegExp(`<${id}>([^]*?)<\\/${id}>`, 'g'))]
+	const cache = args.extension?.evaluatedToolCalls?.[id]
+	if (cache?.signature !== matches.map(match => match[0]).join('\u0000') || cache.entries.length !== matches.length)
+		return null
+	return Promise.all(cache.entries.map(async entry => {
+		await entry.promise
+		if (entry.error) throw entry.error
+		return entry.value
+	}))
+}
 
 /**
  * 处理被执行代码的回调。
@@ -54,7 +67,7 @@ ${code}
 		if (!reply) return
 		reply.logContextBefore.push(feedback)
 		await logger({ name: '理華', ...reply })
-		newCharReply(reply.content, args.extension?.bridge?.platform || 'chat')
+		newCharReply(reply.content, args.extension?.chat?.bridge?.platform || 'chat')
 	}
 	catch (error) {
 		console.error(`Error processing callback for "${reason}":`, error)
@@ -270,14 +283,11 @@ export async function coderunner(result, args) {
 	if (result.content.match(/<inline-js>[^]*?<\/inline-js>/)) try {
 		unlockAchievement('use_coderunner')
 		const original = result.content
-		const cachedResults = args.extension.streamInlineToolsResults?.['inline-js']
+		const cachedResults = await readInlineResults(args, 'inline-js', result.content)
 
 		let replacements
-		if (cachedResults?.length)
-			replacements = await Promise.all(cachedResults.map(res => {
-				if (res instanceof Error) throw res
-				return res
-			}))
+		if (cachedResults)
+			replacements = cachedResults
 		else
 			// 古法计算
 			replacements = await Promise.all(
@@ -330,14 +340,11 @@ export async function coderunner(result, args) {
 		if (result.content.match(runner_regex)) try {
 			unlockAchievement('use_coderunner')
 			const original = result.content
-			const cachedResults = args.extension.streamInlineToolsResults?.[`inline-${shell_name}`]
+			const cachedResults = await readInlineResults(args, `inline-${shell_name}`, result.content)
 
 			let replacements
-			if (cachedResults?.length)
-				replacements = await Promise.all(cachedResults.map(res => {
-					if (res instanceof Error) throw res
-					return res
-				}))
+			if (cachedResults)
+				replacements = cachedResults
 			else {
 				// 古法计算
 				const runner_regex_g = new RegExp(`<inline-${shell_name}>(?<code>[^]*?)<\\/inline-${shell_name}>`, 'g')
@@ -416,7 +423,7 @@ export function GetCoderunnerPreviewUpdater() {
 	function renderRunningCodeBlock(code, lang, args) {
 		return renderMarkdownCodeBlock(code, {
 			lang,
-			title: getChatI18n(args, 'chat.messageView.toolRunningLang', { lang })
+			title: getChatI18n(args, 'chat.message.view.tool.runningLang', { lang })
 		})
 	}
 
@@ -467,7 +474,7 @@ export function GetCoderunnerPreviewUpdater() {
 			 */
 			renderPending: (content, args) => renderMarkdownCodeBlock(String(content ?? '').trim() || '0', {
 				lang: 'txt',
-				title: getChatI18n(args, 'chat.messageView.commonToolCalling'),
+				title: getChatI18n(args, 'chat.message.view.commonToolCalling'),
 			}),
 		}
 	]
@@ -518,5 +525,18 @@ export function GetCoderunnerPreviewUpdater() {
 		])
 	}
 
-	return (next) => defineToolUseBlocks(runBlocks)(defineInlineToolUses(toolDefs)(next))
+	return defineReplyPreviews([
+		...runBlocks.map(block => defineReplyHandler({
+			tag: block.start.slice(1, -1),
+			display: (call, state, args) => block.renderPending(call.inner, args),
+			handle: async () => ({}),
+		})),
+		...toolDefs.map(([id, , , exec, renderPending]) => defineReplyHandler({
+			tag: id,
+			evaluate: (call, args) => exec(call.inner, args),
+			display: (call, state, args) => state.error ? `[Error: ${state.error.message ?? state.error}]`
+				: state.value == null ? renderPending(call.inner, args) : String(state.value),
+			handle: async () => ({}),
+		})),
+	])
 }

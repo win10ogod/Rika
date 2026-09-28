@@ -37,6 +37,6 @@ export function CoreRulesPrompt(args, logical_results) {
 
 	return {
 		text: [],
-		additional_chat_log: [{ name: 'system', role: 'system', content, files: [] }]
+		additional_chat_log: [{ name: 'system', uid: 'system', role: 'system', content, files: [] }]
 	}
 }

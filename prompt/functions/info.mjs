@@ -41,7 +41,7 @@ export async function infoPrompt(args, logical_results) {
 		}
 		{
 			let reversedChatlog = args.chat_log.toReversed()
-			const lastUserMessage = reversedChatlog.find(x => x.name == args.UserCharname)
+			const lastUserMessage = reversedChatlog.find(x => args.UserUid && x.uid === args.UserUid)
 			const lastUserMessageTime = lastUserMessage?.time_stamp
 			if (lastUserMessage?.time_stamp && timeNow - lastUserMessageTime > 3000)
 				result += `\
@@ -49,7 +49,7 @@ export async function infoPrompt(args, logical_results) {
 `
 			else {
 				reversedChatlog = reversedChatlog.slice(reversedChatlog.indexOf(lastUserMessage) + 1)
-				const lastOtherMessage = reversedChatlog.find(x => x.name == args.UserCharname)
+				const lastOtherMessage = reversedChatlog.find(x => args.UserUid && x.uid === args.UserUid)
 				const lastOtherMessageTime = lastOtherMessage?.time_stamp
 				if (lastOtherMessage?.time_stamp && timeNow - lastOtherMessageTime > 3000)
 					result += `\
@@ -62,7 +62,7 @@ export async function infoPrompt(args, logical_results) {
 			}
 		}
 
-		if (lastMessage.name != args.UserCharname && timeNow - lastMessageTime > 3000)
+		if (lastMessage.uid !== args.UserUid && timeNow - lastMessageTime > 3000)
 			result += `\
 距离上条消息已过去：${timeToTimeStr(timeNow - lastMessageTime, args.locales[0])}
 `
@@ -113,6 +113,7 @@ ${Object.entries(modelMap).map(([key, value]) => `\`${key}\`: ${value.join(', ')
 		text: [],
 		additional_chat_log: [{
 			name: 'system',
+			uid: 'system',
 			role: 'system',
 			content: result,
 			files: []

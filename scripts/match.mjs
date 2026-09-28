@@ -1,17 +1,26 @@
 /** @typedef {import('../../../../../../src/public/parts/shells/chat/decl/chatLog.ts').chatReplyRequest_t} chatReplyRequest_t */
 /** @typedef {import('../../../../../../src/public/parts/shells/chat/decl/chatLog.ts').chatLogEntry_t} chatLogEntry_t */
-import { francAll } from 'npm:franc'
 import * as OpenCC from 'npm:opencc-js'
 
 import { charname } from '../charbase.mjs'
-import { translateSource } from '../TranslateSource/index.mjs'
-
 import { remove_kaomoji } from './dict.mjs'
 import { normalizeFancyText } from './fancytext.mjs'
-import { is_PureChinese } from './langdetect.mjs'
-import { escapeRegExp, sleep } from './tools.mjs'
+import { escapeRegExp } from './tools.mjs'
 
 const chT2S = OpenCC.Converter({ from: 'twp', to: 'cn' })
+
+/** 以 fount 的穩定 uid 判斷發言者；顯示名稱不能作為身份依據。 */
+export function isUserSpeaker(entry, args) {
+	return !!(args.UserUid && entry?.uid && entry.uid === args.UserUid)
+}
+
+export function isCharSpeaker(entry, args) {
+	return !!(args.CharUid && entry?.uid && entry.uid === args.CharUid)
+}
+
+export function isReplyToNonMaster(args) {
+	return !!(args.ReplyToUid && args.UserUid && args.ReplyToUid !== args.UserUid)
+}
 /**
  * 将繁体中文内容转换为简体中文。
  * @param {string} content - 要转换的文本内容。
@@ -31,40 +40,13 @@ function SimpleSimplify(content) {
 }
 
 /**
- * 简化给定的内容，以便在 prompt 中使用。
- * 如果内容不是纯中文，会先尝试将其翻译为中文。
+ * 本地正規化內容以供 prompt 匹配，不呼叫翻譯服務。
  * @param {string} content - 要简化的内容。
  * @returns {Promise<[string, string, string]>} - 一个数组，包含原始输入、简体中文版本和标准化花式文本版本。
  */
 export async function SimplifyContent(content) {
 	content = remove_kaomoji(content)
 	if (!content.trim()) return [content]
-	/** @type {string} */
-	let simplified_langcheck_content = content.replace(/<:[^>]*>/g, '').replace(/(:|@\w*|\/)\b\d+(?:\.\d+)?\b/g, '').replace(/@\w*/g, '').replace(/https?:\/\/[\w#%+.:=@\\~-]+/g, '')
-	simplified_langcheck_content = simplified_langcheck_content.replace(/```+.*\n[^]*?```+/g, '')
-	simplified_langcheck_content = simplified_langcheck_content.replace(/(命令|代码|错误|stdout|stderr)(:|：)\s*`[^\n]*?`/g, '')
-	simplified_langcheck_content = simplified_langcheck_content.replace(/\b@[^\s!,.?。！，？]\b/, '')
-	if (!is_PureChinese(simplified_langcheck_content)) {
-		console.info('%ccontent "' + content + '" is not pure chinese, translating it for prompt building logic', 'color: red')
-		console.log('franc result:', francAll(content, { minLength: 0 }))
-		if (translateSource)
-			while (true) try {
-				const result = await translateSource.Translate(content, { from: 'auto', to: 'zh-CN' })
-				content = result.text
-				break
-			}
-			catch (e) {
-				if (e.name == 'TooManyRequestsError') {
-					console.info('Translate API rate limit exceeded, waiting 5 second before retrying')
-					await sleep(5000)
-				}
-				else {
-					console.error('Failed to translate content "' + content + '": ', e)
-					break
-				}
-			}
-		else console.error('Translate source is not available, skipping translation')
-	}
 	return SimpleSimplify(content)
 }
 
@@ -156,22 +138,22 @@ export function getScopedChatLog(args, from = 'any', depth = 4) {
 	// filter roles
 	switch (from) {
 		case 'user':
-			chat_log = chat_log.filter(x => x.name == args.UserCharname)
+			chat_log = chat_log.filter(x => isUserSpeaker(x, args))
 			break
 		case 'notuser':
-			chat_log = chat_log.filter(x => x.name != args.UserCharname)
+			chat_log = chat_log.filter(x => !isUserSpeaker(x, args))
 			break
 		case 'char':
-			chat_log = chat_log.filter(x => x.name == args.Charname)
+			chat_log = chat_log.filter(x => isCharSpeaker(x, args))
 			break
 		case 'notchar':
-			chat_log = chat_log.filter(x => x.name != args.Charname)
+			chat_log = chat_log.filter(x => !isCharSpeaker(x, args))
 			break
 		case 'both':
-			chat_log = chat_log.filter(x => x.name == args.UserCharname || x.name == args.Charname)
+			chat_log = chat_log.filter(x => isUserSpeaker(x, args) || isCharSpeaker(x, args))
 			break
 		case 'other':
-			chat_log = chat_log.filter(x => x.name != args.UserCharname && x.name != args.Charname)
+			chat_log = chat_log.filter(x => !isUserSpeaker(x, args) && !isCharSpeaker(x, args))
 			break
 	}
 	return chat_log

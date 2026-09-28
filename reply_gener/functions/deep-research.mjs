@@ -1,6 +1,8 @@
 /** @typedef {import("../../../../../../../src/public/parts/shells/chat/decl/chatLog.ts").chatLogEntry_t} chatLogEntry_t */
 /** @typedef {import("../../../../../../../src/decl/prompt_struct.ts").prompt_struct_t} prompt_struct_t */
 
+import { runReplyHandlers } from '../../../../../../../src/public/parts/shells/chat/src/reply/handlerPipeline.mjs'
+import { injectRoundEntries } from '../../../../../../../src/public/parts/shells/chat/src/reply/roundContext.mjs'
 import { OrderedAISourceCalling } from '../../AISource/index.mjs'
 import { config } from '../../config/index.mjs'
 import { mergePrompt } from '../../prompt/build.mjs'
@@ -13,7 +15,7 @@ import { statisticDatas } from '../../scripts/statistics.mjs'
 import { sleep } from '../../scripts/tools.mjs'
 import { getLongTimeLogAdder } from '../index.mjs'
 
-import { coderunner } from './coderunner.mjs'
+import { coreCodeReplyHandler } from './core-tools.mjs'
 import { webbrowse } from './webbrowse.mjs'
 import { websearch } from './websearch.mjs'
 
@@ -95,13 +97,19 @@ export async function deepResearch(result, args) {
 	const startTime = Date.now()
 	const thinkingArgs = {
 		UserCharname: args.UserCharname,
+		UserUid: args.UserUid,
+		Charname: args.Charname,
+		CharUid: args.CharUid,
+		char_id: args.char_id,
 		username: args.username,
 		chat_log: thinking_prompt_struct.chat_log,
 		AddLongTimeLog: addThinkingLongTimeLog,
 		prompt_struct: thinking_prompt_struct,
 		chat_scoped_char_memory: args.chat_scoped_char_memory,
+		workdir: args.workdir,
 		plugins: args.plugins,
 		extension: args.extension,
+		generation_options: args.generation_options,
 		supported_functions: {
 			markdown: true,
 			files: false,
@@ -262,6 +270,7 @@ Step 2: <步骤2主题>
 					const stepOutput = {
 						content: requestResult.content,
 						name: '理華',
+						uid: args.CharUid,
 						role: 'char',
 						files: requestResult.files, // Include files if any were attached to the response
 						logContextBefore: [],
@@ -269,8 +278,14 @@ Step 2: <步骤2主题>
 						extension: {}
 					}
 
-					let functionCalled = false
-					for (const replyHandler of [coderunner, websearch, webbrowse])
+					let functionCalled = await runReplyHandlers(stepOutput, thinkingArgs, [coreCodeReplyHandler])
+					if (functionCalled) {
+						console.info(`Deep-research: Cycle ${planningCycles}, Step ${step.step} - Code execution triggered. Waiting for result...`)
+						await injectRoundEntries(thinkingArgs, thinking_prompt_struct, { consumeWakes: false })
+						await sleep(thinking_interval)
+						continue regen_step
+					}
+					for (const replyHandler of [websearch, webbrowse])
 						if (await replyHandler(stepOutput, thinkingArgs)) {
 							functionCalled = true
 							console.info(`Deep-research: Cycle ${planningCycles}, Step ${step.step} - Function triggered by handler: ${replyHandler.name}. Waiting for result...`)
@@ -296,7 +311,7 @@ Step 2: <步骤2主题>
 
 						// Assume valid execution output (text result or obstacle description)
 						console.info(`Deep-research: Cycle ${planningCycles}, Step ${step.step} Result: ${stepOutput.content}`)
-						step.result = stepOutput.content // Store the final text result for this step
+						step.result = stepOutput.content_for_show ?? stepOutput.content // Store the final text result for this step
 						thinking_prompt_struct.chat_log.push(stepOutput) // Log the final step output
 						stepCompleted = true
 						await sleep(thinking_interval) // Small delay before next step or summary phase

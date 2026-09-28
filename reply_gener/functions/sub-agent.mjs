@@ -38,6 +38,7 @@ function buildSubAgentArgs(args, call, source, parentChatLog) {
 	const childExtension = { ...args.extension }
 	delete childExtension.logical_results
 	delete childExtension.streamInlineToolsResults
+	delete childExtension.evaluatedToolCalls
 	delete childExtension.ai_source_override
 	Object.assign(childExtension, {
 		is_sub_agent: true,
@@ -66,10 +67,11 @@ ${call.context ? `<context>\n${call.context}\n</context>` : ''}
 	return {
 		...args,
 		ReplyToCharname: args.UserCharname,
+		ReplyToUid: args.UserUid,
 		chat_name: `${args.chat_name || 'chat'}/sub-agent/${call.name}`,
 		chat_log: [
 			...parentChatLog.map(cloneChatLogEntry),
-			{ name: 'sub-agent-task', role: 'system', content: taskMessage, files: [] }
+			{ name: 'sub-agent-task', uid: 'system', role: 'system', content: taskMessage, files: [] }
 		],
 		timelines: [],
 		plugins: {},

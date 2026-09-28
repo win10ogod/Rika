@@ -28,6 +28,7 @@ async function getAISuggestionForError(error, errorMessageForRecord, originalArg
 	const selfRepairChatLog = [
 		{
 			name: botNameForAI,
+			uid: originalArgs.CharUid || 'char',
 			content: '我在。有什麼需要處理？',
 			time_stamp: new Date().getTime(),
 			role: 'char',
@@ -35,6 +36,7 @@ async function getAISuggestionForError(error, errorMessageForRecord, originalArg
 		},
 		{
 			name: ownerNameForAI,
+			uid: originalArgs.UserUid || 'user',
 			content: errorMessageForRecord + (is_dist ? `
 理華，解释下这个错误是什么？可能该如何修复？
 說明這個錯誤的可能原因與可驗證的修復方向。
@@ -52,6 +54,7 @@ async function getAISuggestionForError(error, errorMessageForRecord, originalArg
 		},
 		{
 			name: 'system',
+			uid: 'system',
 			content: '精準分析錯誤，區分證據、假設與未驗證部分。',
 			time_stamp: new Date().getTime(),
 			role: 'system',
@@ -62,6 +65,8 @@ async function getAISuggestionForError(error, errorMessageForRecord, originalArg
 	/** @type {FountChatReplyRequest_t} */
 	const selfRepairRequest = {
 		...originalArgs,
+		CharUid: originalArgs.CharUid || 'char',
+		UserUid: originalArgs.UserUid || 'user',
 		// 避免部件出错导致诊断也跟着爆炸从而失去诊断意义，覆盖所有非本角色的部件
 		world: null,
 		user: null,
@@ -151,7 +156,9 @@ export async function handleCharTopLevelError(error, context, selfEntityHash) {
 			username: context.username,
 			char_id: BotCharname,
 			Charname: BotCharname,
+			CharUid: 'char',
 			UserCharname: context.username,
+			UserUid: 'user',
 			chat_scoped_char_memory: {},
 			chat_log: [],
 		}

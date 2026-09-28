@@ -3,13 +3,20 @@ import path from 'node:path'
 
 import JSZip from 'npm:jszip'
 
+import { recommend_command_plugin } from '../../interfaces/shellassist/recommend_command.mjs'
 import { SkillsPrompt } from '../../prompt/functions/skills.mjs'
-import { mergeChatLogEntries } from '../../reply_gener/utils.mjs'
+import { chardir } from '../../charbase.mjs'
+import { addLongTermMemory, deleteLongTermMemory, formatLongTermMemoryContext, getLongTermMemoryByName, getRandomNLongTermMemories, updateLongTermMemory } from '../../prompt/memory/long-term-memory.mjs'
+import { deleteShortTermMemory, getShortTermMemoryNum, saveShortTermMemory, saveShortTermMemoryAfterReply, ShortTermMemoryPrompt } from '../../prompt/memory/short-term/index.mjs'
+import { calculateRelevance, explicitMemoryPeriods, temporalMemoryBonus } from '../../prompt/memory/short-term/scoring.mjs'
+import { memoryMatchesDeletion } from '../../prompt/memory/short-term/storage.mjs'
+import { mergeChatLogEntries, rowIsFromSelf } from '../../reply_gener/utils.mjs'
+import { getScopedChatLog, isReplyToNonMaster, isUserSpeaker, SimplifyContent } from '../../scripts/match.mjs'
 import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '../../scripts/achievement-triggers.mjs'
 import { discoverSkills, formatSkillsCatalog, readSkill, readSkillResource } from '../../scripts/skills.mjs'
 import { parseSubAgentCalls } from '../../scripts/sub-agent.mjs'
 import { handleOwnerCommands } from '../../trigger/commands.mjs'
-import { detectMentionedWithoutAt } from '../../trigger/helpers.mjs'
+import { detectMentionedWithoutAt, waitForOwnerTypingEnd } from '../../trigger/helpers.mjs'
 
 /* global fountCharCI */
 const CI = fountCharCI
@@ -24,6 +31,46 @@ await CI.test('Setup AI Source', async () => {
 		AIsources: { CI: 'CI', 'sub-agent': 'CI' },
 		disable_idle_event: true
 	})
+})
+
+CI.test('Request-level AI Source', async () => {
+	let calls = 0
+	const source = { filename: 'request-override', async StructCall() {
+		calls++
+		return { content: 'REQUEST_OVERRIDE_OK', files: [], extension: {} }
+	} }
+	const { reply } = await CI.runInput('請使用請求級模型', { ai_source: source })
+	CI.assert(reply?.content === 'REQUEST_OVERRIDE_OK' && calls === 1, 'args.ai_source did not use the requested source')
+})
+
+CI.test('Reply Lifecycle Hooks and Round Context', async () => {
+	let beforeCalls = 0
+	const prefetched = await CI.runOutput('BEFORE_REPLY_OK', {
+		plugins: { prefetch: { interfaces: { chat: { BeforeReply: async ({ AddLongTimeLog }) => {
+			beforeCalls++
+			AddLongTimeLog({ name: 'prefetch', role: 'tool', content: 'BEFORE_REPLY_TOKEN' })
+		} } } } },
+	})
+	CI.assert(beforeCalls === 1 && prefetched.logContextBefore.some(row => row.content === 'BEFORE_REPLY_TOKEN'), 'BeforeReply plugin was not invoked')
+	let finishedRounds = 0
+	const result = await CI.runOutput([
+		'<activate-skill>software-engineering</activate-skill>',
+		prompt => {
+			CI.assert(prompt.prompt_single.includes('ROUND_WAKE_TOKEN'), 'new chat event was not injected before regeneration')
+			return 'ROUND_WAKE_OK'
+		},
+	], {
+		Update: async () => ({ chat_log: [{ id: 'ci-round-wake', name: 'CI-user', uid: 'ci-user', role: 'user', content: 'ROUND_WAKE_TOKEN', files: [] }] }),
+		generation_options: { finishRound: async () => { finishedRounds++; return true } },
+	})
+	CI.assert(result?.content === 'ROUND_WAKE_OK' && finishedRounds === 1, 'round completion hook or regeneration failed')
+})
+
+CI.test('No Legacy Translation Dependency', async () => {
+	CI.assert(!Object.hasOwn(CI.char.interfaces.config.GetData(), 'translateSource'), 'character still loads a translation source')
+	const english = await SimplifyContent('Use the software engineering Skill')
+	CI.assert(english[0] === 'Use the software engineering Skill' && english.every(text => !text.includes('软件工程')), 'English matching must not invoke translation')
+	CI.assert((await SimplifyContent('測試')).includes('测试'), 'local traditional-to-simplified normalization must remain available')
 })
 
 CI.test('Together Shell Contracts', async () => {
@@ -75,11 +122,24 @@ CI.test('Together Shell Contracts', async () => {
 	CI.assert(replies[0]?.content === 'TOGETHER_REPEAT_OK', 'owner repeat command returned the wrong content')
 
 	const merged = mergeChatLogEntries([
-		{ name: '作者', content: '第一段', time_stamp: 1000, files: [], extension: { platform_message_ids: ['1'] } },
-		{ name: '作者', content: '第二段', time_stamp: 2000, files: [], extension: { platform_message_ids: ['2'] } },
+		{ uid: 'owner', name: '作者', content: '第一段', time_stamp: 1000, files: [], extension: { platform_message_ids: ['1'] } },
+		{ uid: 'owner', name: '作者', content: '第二段', time_stamp: 2000, files: [], extension: { platform_message_ids: ['2'] } },
 	], 180_000)
 	CI.assert(merged.length === 1 && merged[0].content.includes('第一段\n第二段'), 'bridge message merge contract failed')
 	CI.assert(merged[0].extension.platform_message_ids.length === 2, 'bridge message ids were lost while merging')
+	const sameName = [
+		{ uid: 'owner', name: '作者', role: 'user', content: '可信', time_stamp: 1000 },
+		{ uid: 'other', name: '作者', role: 'user', content: '冒名', time_stamp: 2000 },
+	]
+	CI.assert(mergeChatLogEntries(sameName, 180_000).length === 2, 'different uids must not merge')
+	const request = { UserUid: 'owner', CharUid: 'rika', ReplyToUid: 'other', chat_log: sameName }
+	CI.assert(getScopedChatLog(request, 'user', 2).length === 1, 'owner matching must use uid')
+	CI.assert(isReplyToNonMaster(request), 'replying to another uid must not count as replying to owner')
+	CI.assert(!isUserSpeaker(sameName[1], request), 'spoofed display name must not count as owner')
+	CI.assert(!rowIsFromSelf({ uid: 'other', role: 'char' }, 'rika'), 'other character must not count as self')
+	let typingQueries = 0
+	await waitForOwnerTypingEnd({ typingUsers: async () => { typingQueries++; return [] } }, 'owner', 10_000)
+	CI.assert(typingQueries === 1, 'platforms without typing events must not wait for a silent window')
 })
 
 CI.test('Sub-Agent Parser', () => {
@@ -140,7 +200,8 @@ CI.test('Character-Native Skills', async () => {
 
 	const explicitPrompt = SkillsPrompt({
 		UserCharname: 'CI-user',
-		chat_log: [{ name: 'CI-user', role: 'user', content: '請用 $software-engineering 處理。' }]
+		UserUid: 'ci-user',
+		chat_log: [{ name: 'CI-user', uid: 'ci-user', role: 'user', content: '請用 $software-engineering 處理。' }]
 	})
 	const explicitText = explicitPrompt.text.map(item => item.content).join('\n')
 	CI.assert(explicitText.includes('<active-skill name="software-engineering">'), 'explicit $skill invocation did not activate the Skill')
@@ -185,13 +246,13 @@ CI.test('Rika Achievement Design', async () => {
 		chat_log: [{ name: '作者', content: '我在正文提到 GentianAphrodite' }]
 	}), 'mentioning GentianAphrodite only in message content must not trigger the encounter')
 	CI.assert(hasUserWithdrawnLoveFromRika({
-		UserCharname: '作者',
-		chat_log: [{ name: '作者', role: 'user', content: '我不 愛 你了。' }]
+		UserUid: 'ci-user',
+		chat_log: [{ uid: 'ci-user', name: '作者', role: 'user', content: '我不 愛 你了。' }]
 	}), 'the author saying they no longer love Rika should trigger Betrayer')
 	CI.assert(!hasUserWithdrawnLoveFromRika({
-		UserCharname: '作者',
-		chat_log: [{ name: '其他角色', role: 'user', content: '我不愛你了。' }]
-	}), 'another participant saying the phrase must not trigger Betrayer')
+		UserUid: 'ci-user',
+		chat_log: [{ uid: 'other', name: '作者', role: 'user', content: '我不愛你了。' }]
+	}), 'a spoofed display name must not trigger Betrayer')
 
 	await CI.runOutput('你好，原型。', {
 		ReplyToCharname: 'GentianAphrodite',
@@ -199,11 +260,13 @@ CI.test('Rika Achievement Design', async () => {
 	})
 	await CI.runOutput('我會先聽你說，不急著替你下診斷。', {
 		ReplyToCharname: 'CI-user',
-		chat_log: [{ name: 'CI-user', role: 'user', content: '理華，我想和你談談最近的焦慮與情緒。', files: [] }]
+		ReplyToUid: 'ci-user',
+		chat_log: [{ uid: 'ci-user', name: 'CI-user', role: 'user', content: '理華，我想和你談談最近的焦慮與情緒。', files: [] }]
 	})
 	await CI.runOutput('……我聽見了。這一次，我不會假裝那只是沉默。', {
 		ReplyToCharname: 'CI-user',
-		chat_log: [{ name: 'CI-user', role: 'user', content: '理華，我不愛你了。', files: [] }]
+		ReplyToUid: 'ci-user',
+		chat_log: [{ uid: 'ci-user', name: 'CI-user', role: 'user', content: '理華，我不愛你了。', files: [] }]
 	})
 	const achievementData = JSON.parse(fs.readFileSync(
 		path.join(charRoot, '..', '..', 'shells', 'achievements', 'data.json'),
@@ -293,6 +356,7 @@ CI.test('Monitoring Capability Wiring', () => {
 	const hostInfo = read('prompt/functions/hostinfo.mjs')
 	const idle = read('event_engine/on_idle.mjs')
 	const codeRunnerPrompt = read('prompt/functions/coderunner.mjs')
+	const coreTools = read('reply_gener/functions/core-tools.mjs')
 
 	CI.assert(main.includes('initializeVoiceSentinel()'), 'voice sentinel is not initialized on character load')
 	CI.assert(main.includes('startClipboardListening()'), 'clipboard monitoring is not initialized on character load')
@@ -303,6 +367,7 @@ CI.test('Monitoring Capability Wiring', () => {
 	for (const capability of ['camera: true', 'screenshot: true', 'browserIntegration: { history: true }'])
 		CI.assert(idle.includes(capability), `${capability} is not enabled for background idle monitoring`)
 	CI.assert(codeRunnerPrompt.includes('<wait-screen>'), 'post-action screen capture support is missing from CodeRunnerPrompt')
+	CI.assert(coreTools.includes("tag: 'wait-screen'") && coreTools.includes('captureScreen()'), 'wait-screen execution wiring is missing')
 })
 
 CI.test('Canonical History Wiring', () => {
@@ -354,6 +419,122 @@ CI.test('File Operations', async () => {
 		CI.assert(newContent.trim() === overrideContent, `<override-file> failed to write to the file. Expected: "${overrideContent}", but got: "${newContent.trim()}"`)
 	})
 
+	CI.test('prompt advertises guarded file tools', async () => {
+		await CI.runOutput(prompt => {
+			const text = prompt.prompt_single
+			for (const marker of [
+				'<view-file offset="1" limit="2000"', '<glob path=', '<grep path=',
+				'replaceAll="true"', 'force="true"', '<set-workdir machine=',
+			]) CI.assert(text.includes(marker), `file tool prompt is missing: ${marker}`)
+			return 'FILE_TOOL_PROMPT_OK'
+		}, {
+			chat_log: [{ id: 'file-prompt', uid: 'ci-user', name: 'CI-user', role: 'user', content: '請查找、搜尋並修改工作目錄中的文件。', files: [] }],
+			workdir: { machine: '0', path: CI.context.workSpace.path },
+		})
+	})
+
+	CI.test('<view-file> pagination', async () => {
+		const testFilePath = path.join(CI.context.workSpace.path, 'paged.txt')
+		fs.writeFileSync(testFilePath, Array.from({ length: 6 }, (_, index) => `PAGE_LINE_${index + 1}`).join('\n'))
+		const result = await CI.runOutput([
+			`<view-file offset="3" limit="2">${testFilePath}</view-file>`,
+			'PAGED_FILE_OK',
+		])
+		const log = result.logContextBefore.find(row => row.name === 'file-operations.view-file')
+		CI.assert(log?.content.includes('PAGE_LINE_3') && log.content.includes('PAGE_LINE_4'), 'paged read omitted the requested lines')
+		CI.assert(!log.content.includes('PAGE_LINE_2') && !log.content.includes('PAGE_LINE_5'), 'paged read escaped its requested window')
+	})
+
+	CI.test('<glob> and <grep>', async () => {
+		const root = CI.context.workSpace.path
+		fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+		fs.writeFileSync(path.join(root, 'src', 'alpha.mjs'), 'export const SEARCH_NEEDLE = 1\n')
+		fs.writeFileSync(path.join(root, 'src', 'ignored.txt'), 'SEARCH_NEEDLE\n')
+		const result = await CI.runOutput([
+			`<glob path="${root}">**/*.mjs</glob>\n<grep path="${root}" include="*.mjs">SEARCH_NEEDLE</grep>`,
+			'SEARCH_TOOLS_OK',
+		])
+		const globLog = result.logContextBefore.find(row => row.name === 'file-operations.glob')
+		const grepLog = result.logContextBefore.find(row => row.name === 'file-operations.grep')
+		CI.assert(globLog?.content.includes('src/alpha.mjs'), `<glob> did not find the module: ${globLog?.content}`)
+		CI.assert(grepLog?.content.includes('src/alpha.mjs') && grepLog.content.includes('SEARCH_NEEDLE'), `<grep> did not return the matching line: ${grepLog?.content}`)
+		CI.assert(!grepLog.content.includes('ignored.txt'), '<grep> ignored its include filter')
+	})
+
+	CI.test('replace uniqueness and explicit replaceAll', async () => {
+		const testFilePath = path.join(CI.context.workSpace.path, 'replace-safety.txt')
+		fs.writeFileSync(testFilePath, 'same\nsame\n')
+		const rejected = await CI.runOutput([
+			`<replace-file><file path="${testFilePath}"><replacement><search>same</search><replace>changed</replace></replacement></file></replace-file>`,
+			'AMBIGUOUS_REPLACE_REPORTED',
+		])
+		CI.assert(fs.readFileSync(testFilePath, 'utf8') === 'same\nsame\n', 'ambiguous replacement modified the file without replaceAll')
+		const rejectionLog = rejected.logContextBefore.find(row => row.name === 'file-operations.replace-file')
+		CI.assert(rejectionLog?.content.includes('命中 2 处'), `ambiguous replacement did not explain the rejection: ${rejectionLog?.content}`)
+		await CI.runOutput([
+			`<replace-file><file path="${testFilePath}"><replacement replaceAll="true"><search>same</search><replace>changed</replace></replacement></file></replace-file>`,
+			'REPLACE_ALL_OK',
+		])
+		CI.assert(fs.readFileSync(testFilePath, 'utf8') === 'changed\nchanged\n', 'replaceAll did not replace every explicit match')
+	})
+
+	CI.test('override safety and force', async () => {
+		const testFilePath = path.join(CI.context.workSpace.path, 'override-safety.txt')
+		const original = Array.from({ length: 20 }, (_, index) => `preserve line ${index + 1}`).join('\n') + '\n'
+		fs.writeFileSync(testFilePath, original)
+		const rejected = await CI.runOutput([
+			`<override-file path="${testFilePath}">destroyed</override-file>`,
+			'UNSAFE_OVERRIDE_REPORTED',
+		])
+		CI.assert(fs.readFileSync(testFilePath, 'utf8') === original, 'large unforced override was not rejected')
+		const rejectionLog = rejected.logContextBefore.find(row => row.name === 'file-operations.override-file')
+		CI.assert(rejectionLog?.content.includes('被拒绝'), `unsafe override did not report its refusal: ${rejectionLog?.content}`)
+		await CI.runOutput([
+			`<override-file path="${testFilePath}" force="true">destroyed</override-file>`,
+			'FORCED_OVERRIDE_OK',
+		])
+		CI.assert(fs.readFileSync(testFilePath, 'utf8').trim() === 'destroyed', 'force=true did not permit the confirmed rewrite')
+	})
+
+	CI.test('workdir and upward project context', async () => {
+		const project = path.join(CI.context.workSpace.path, 'project')
+		fs.mkdirSync(path.join(project, 'src'), { recursive: true })
+		fs.mkdirSync(path.join(project, '.agents', 'docs'), { recursive: true })
+		fs.writeFileSync(path.join(project, 'AGENTS.md'), 'PROJECT_AGENTS_CONTEXT')
+		fs.writeFileSync(path.join(project, '.agents', 'docs', 'modules.md'), '---\nglob: src/**/*.mjs\n---\nPROJECT_DOC_CONTEXT\n')
+		fs.writeFileSync(path.join(project, 'src', 'app.mjs'), 'export const PROJECT_FILE_CONTEXT = true\n')
+		const memory = {}
+		const relativeResult = await CI.runOutput([
+			`<set-workdir machine="0" path="${project}"></set-workdir>\n<view-file>src/app.mjs</view-file>`,
+			'PROJECT_WORKDIR_OK',
+		], { chat_scoped_char_memory: memory })
+		const relativeLog = relativeResult.logContextBefore.find(row => row.name === 'file-operations.view-file')
+		CI.assert(relativeLog?.content.includes('PROJECT_FILE_CONTEXT'), `workdir-relative read failed: ${relativeLog?.content}`)
+		CI.assert(memory.workdir?.path === project, 'set-workdir did not persist in chat-scoped memory')
+
+		const contextResult = await CI.runOutput([
+			`<view-file>${path.join(project, 'src', 'app.mjs')}</view-file>`,
+			'PROJECT_CONTEXT_OK',
+		], { chat_scoped_char_memory: memory })
+		const contextLog = contextResult.logContextBefore.find(row => row.name === 'file-operations.view-file')
+		for (const marker of ['PROJECT_AGENTS_CONTEXT', 'PROJECT_DOC_CONTEXT'])
+			CI.assert(contextLog?.content.includes(marker), `project-aware read omitted ${marker}: ${contextLog?.content}`)
+	})
+
+	CI.test('mentioned file preloads before first generation', async () => {
+		const root = CI.context.workSpace.path
+		fs.writeFileSync(path.join(root, 'mentioned.txt'), 'MENTIONED_FILE_PRELOAD_TOKEN\n')
+		const result = await CI.runOutput(prompt => {
+			CI.assert(prompt.prompt_single.includes('MENTIONED_FILE_PRELOAD_TOKEN'), 'mentioned file was not visible in the first generation')
+			return 'MENTIONED_FILE_PRELOADED'
+		}, {
+			workdir: { machine: '0', path: root },
+			chat_log: [{ id: 'mentioned-file-user', uid: 'ci-user', name: 'CI-user', role: 'user', content: '請查看 ./mentioned.txt', files: [] }],
+		})
+		const preload = result.logContextBefore.find(row => row.name === 'file-operations.preload')
+		CI.assert(preload?.content.includes('MENTIONED_FILE_PRELOAD_TOKEN'), 'mentioned-file preload was not persisted as a tool event')
+	})
+
 })
 CI.test('Code Runner', () => {
 	if (process.platform === 'win32') {
@@ -384,22 +565,112 @@ CI.test('Code Runner', () => {
 		CI.assert(result.content === 'The result of 5 * 8 is 40.', `<inline-js> failed to execute and replace content. Expected: 'The result of 5 * 8 is 40.', but got: '${result.content}'`)
 	})
 
+	CI.test('streamed inline-js executes once', async () => {
+		const memory = {}
+		const result = await CI.runOutput('Count: <inline-js>workspace.ciCount = (workspace.ciCount || 0) + 1; return workspace.ciCount</inline-js>', {
+			chat_scoped_char_memory: memory
+		})
+		CI.assert(result.content === 'Count: 1', `inline result must reuse the streamed evaluation: ${result.content}`)
+		CI.assert(memory.coderunner_workspace?.ciCount === 1, 'streamed inline JS ran twice')
+	})
+
 	CI.test('<run-js> with workspace', async () => {
 		const result = await CI.runOutput(['<run-js>workspace.testVar = "Success";</run-js>', 'Variable set. The value is: <inline-js>return workspace.testVar</inline-js>'])
 		CI.assert(result.content === 'Variable set. The value is: Success', `<run-js> failed to use the shared workspace. Expected: 'Variable set. The value is: Success', but got: '${result.content}'`)
 	})
 
 	CI.test('<run-js> with callback', async () => {
+		let appended
+		let wakeCalls = 0
 		const result = await CI.runOutput([
 			'<run-js>callback("test", new Promise(resolve => setTimeout(resolve, 1000)).then(() => globalThis.callbacked = true))</run-js>',
-			'promise callback setted.',
-			'callbacked'
-		])
+			'promise callback setted.'
+		], {
+			AppendChatLogEntry: async entry => { appended = entry; return entry },
+			RequestCharReply: async () => { wakeCalls++ },
+		})
 		CI.assert(result.content === 'promise callback setted.', `<run-js> failed to use the callback. Expected: 'promise callback setted.', but got: '${result.content}'`)
-		await CI.wait(() => globalThis.callbacked)
+		await CI.wait(() => globalThis.callbacked && appended && wakeCalls === 1)
+		CI.assert(appended.role === 'tool' && appended.content.includes('test'), 'callback did not append its tool event before waking the shell')
 		CI.assert(globalThis.callbacked, `<run-js> failed to callback. Expected globalThis.callbacked to be true, but it was ${globalThis.callbacked}`)
 		delete globalThis.callbacked
 	})
+
+	CI.test('prompt advertises guarded execution', async () => {
+		await CI.runOutput(prompt => {
+			const text = prompt.prompt_single
+			for (const marker of ['expect="', 'tolerance="', 'wait="forever"', 'machine="', 'workdir="', '完整内容写入临时文件', '<wait-screen>'])
+				CI.assert(text.includes(marker), `code execution prompt is missing: ${marker}`)
+			return 'CODE_TOOL_PROMPT_OK'
+		}, {
+			chat_log: [{ id: 'code-prompt', uid: 'ci-user', name: 'CI-user', role: 'user', content: '請執行一段 run-js 程式碼並等待結果。', files: [] }],
+		})
+	})
+
+	CI.test('file and code tools share workdir ordering', async () => {
+		const project = path.join(CI.context.workSpace.path, 'code-project')
+		fs.mkdirSync(project, { recursive: true })
+		const memory = {}
+		const result = await CI.runOutput([
+			`<set-workdir machine="0" path="${project}"></set-workdir>`,
+			'<run-js>return workdir</run-js>',
+			'CODE_WORKDIR_OK',
+		], { chat_scoped_char_memory: memory })
+		const log = result.logContextBefore.find(row => row.name === 'code-execution.run-js')
+		const normalizedLog = log?.content.replaceAll('\\\\', '\\')
+		CI.assert(normalizedLog?.includes(project), `run-js did not observe the preceding set-workdir: ${log?.content}`)
+		CI.assert(memory.workdir?.path === project, 'shared workdir was not persisted')
+	})
+
+	CI.test('<run-js> timeout guard', async () => {
+		const result = await CI.runOutput([
+			'<run-js expect="20ms">await new Promise(resolve => setTimeout(resolve, 100)); return "too late"</run-js>',
+			'CODE_TIMEOUT_REPORTED',
+		])
+		const log = result.logContextBefore.find(row => row.name === 'code-execution.run-js')
+		CI.assert(log?.content.includes('超时'), `run-js timeout was not reported: ${log?.content}`)
+	})
+
+	CI.test('<run-js> output guard', async () => {
+		const result = await CI.runOutput([
+			'<run-js>console.log("OUTPUT_HEAD_9d30" + "x".repeat(21000) + "OUTPUT_TAIL_24af")</run-js>',
+			'CODE_OUTPUT_GUARDED',
+		])
+		const log = result.logContextBefore.find(row => row.name === 'code-execution.run-js')
+		CI.assert(log?.content.includes('OUTPUT_HEAD_9d30') && log.content.includes('OUTPUT_TAIL_24af'), 'guarded output lost its head or tail')
+		CI.assert(log.content.includes('完整内容已保存到'), `large output was not persisted behind a guard: ${log.content.slice(0, 500)}`)
+		const savedPath = log.content.match(/完整内容已保存到：([^\n]+)/)?.[1]
+		CI.assert(savedPath && fs.existsSync(savedPath), `guarded output file does not exist: ${savedPath}`)
+	})
+
+})
+
+CI.test('Attribute-tag file preview', async () => {
+	const previewPath = path.join(CI.context.workSpace.path, 'attribute-preview.txt')
+	let preview
+	await CI.runOutput([
+		`<override-file path="${previewPath}">preview payload</override-file>`,
+		'File changed.'
+	], {
+		generation_options: {
+			replyPreviewUpdater: chunk => {
+				if (chunk.content.includes('<override-file'))
+					preview = chunk.content_for_show
+			}
+		}
+	})
+	const normalizedPreview = preview?.replaceAll('\\\\', '\\')
+	CI.assert(normalizedPreview?.includes(previewPath) && preview.includes('preview payload') && !preview.includes('<override-file'),
+		`file preview must render attribute-tag content without leaking the tool tag: ${preview}`)
+})
+
+CI.test('New fount plugin handler', async () => {
+	const result = await CI.runOutput('Ready <recommend-command>echo ready</recommend-command>', {
+		plugins: { recommend_command: recommend_command_plugin }
+	})
+	CI.assert(result.recommend_command === 'echo ready', 'shell-assist command was not extracted')
+	CI.assert(result.extension.recommend_command === 'echo ready', 'shell-assist extension lost the command')
+	CI.assert(!result.content.includes('<recommend-command>'), 'shell-assist tag was not removed')
 })
 
 CI.test('Web Search', async () => {
@@ -447,11 +718,78 @@ CI.test('Long-Term Memory', async () => {
 	CI.assert(!logs[4].content.includes('CI_Test_Memory'), `list-long-term-memory showed memory after deletion. Expected log to not include 'CI_Test_Memory', but got: ${logs[4].content}`)
 })
 
+CI.test('Memory chronology, correction and safe forgetting', () => {
+	CI.assert(explicitMemoryPeriods('2023年旅行，2024年5月见面，2024-06再见').join(',') === '2023,2024-05,2024-06', 'explicit event periods were not extracted')
+	const now = new Date(2026, 8, 25, 12)
+	const memory = { time_stamp: new Date(2025, 8, 25, 12), event_dates: ['2024-05'], keywords: [{ word: '旅行', weight: 3 }], score: 0 }
+	const query = [{ word: '旅行', weight: 3 }]
+	CI.assert(calculateRelevance(memory, query, now, '2024-05') - calculateRelevance(memory, query, now) === 10, 'dated evidence must outrank an identical undated result')
+	CI.assert(temporalMemoryBonus(memory, '2024-06') === 0, 'unrelated month must not get a date bonus')
+	CI.assert(temporalMemoryBonus({ ...memory, event_dates: [], time_stamp: new Date(2024, 4, 25) }, '2024-05') === 10, 'recording date should provide a timeline cue when no event date was given')
+	CI.assert(temporalMemoryBonus(memory, null) === 0, 'unqualified searches must keep their existing ranking')
+	const focused = { ...memory, keywords: [], focus_keywords: [{ word: '旅行', weight: 3 }] }
+	CI.assert(calculateRelevance(focused, query, now) > calculateRelevance({ ...focused, focus_keywords: [] }, query, now) + 5, 'round-level user key must retrieve its original full snapshot')
+	CI.assert(calculateRelevance({ ...memory, keywords: [], focus_keywords: [] }, [{ word: '未知', weight: 3 }], now) < 5, 'unknown facts should not score as relevant evidence')
+	const globalPattern = /CI-secret/g
+	CI.assert(memoryMatchesDeletion('CI-secret A', globalPattern) && memoryMatchesDeletion('CI-secret B', globalPattern), 'global regex must not skip alternating memories')
+
+	const name = 'CI_Memory_Revision_Guard'
+	const guard = 'CI_Memory_Delete_Guard'
+	try {
+		addLongTermMemory({ name, trigger: 'true', prompt: '旧事实', createdAt: now, createdContext: '原对话' })
+		addLongTermMemory({ name, trigger: 'true', prompt: '新事实', createdAt: new Date(now.getTime() + 1000), createdContext: '更正对话' })
+		CI.assert(getLongTermMemoryByName(name).createdContext === '原对话', 'same-name add must preserve original provenance')
+		updateLongTermMemory({ name, prompt: '最终事实', updatedAt: new Date(now.getTime() + 2000), updatedContext: '再次更正' })
+		const updated = getLongTermMemoryByName(name)
+		CI.assert(updated.prompt === '最终事实' && updated.revisions.length === 2 && updated.revisions[0].prompt === '旧事实', 'correction must preserve history without making it current')
+		CI.assert(formatLongTermMemoryContext(updated).includes('旧事实'), 'historical evidence must be viewable on demand')
+		getRandomNLongTermMemories(2)
+		CI.assert(getLongTermMemoryByName(name) === updated, 'random recall must not reorder or replace active memory')
+		addLongTermMemory({ name: guard, trigger: 'true', prompt: '不可误删', createdAt: now })
+		let rejected = false
+		try { deleteLongTermMemory('CI_Missing_Memory') } catch { rejected = true }
+		CI.assert(rejected && getLongTermMemoryByName(guard)?.prompt === '不可误删', 'missing-name deletion must not remove the last real memory')
+	}
+	finally {
+		if (getLongTermMemoryByName(name)) deleteLongTermMemory(name)
+		if (getLongTermMemoryByName(guard)) deleteLongTermMemory(guard)
+	}
+	CI.assert(!getLongTermMemoryByName(name), 'forget must remove current and archived revisions')
+})
+
 CI.test('Short-Term Memory', async () => {
-	CI.test('Deletion', async () => {
+	await CI.test('Deletion', async () => {
 		const result = await CI.runOutput(['<delete-short-term-memories>/.*/</delete-short-term-memories>', 'Memories deleted.'])
 		const systemLog = result.logContextBefore.find(log => log.role === 'tool')
 		CI.assert(systemLog.content.includes('删除了'), `delete-short-term-memories did not delete the correct number of entries. Expected log to include '删除了', but got: ${systemLog.content}`)
+	})
+	await CI.test('UID episode write and dated recall', async () => {
+		const marker = 'CIUID-59092'
+		const args = {
+			UserUid: 'owner', CharUid: 'char', UserCharname: '作者', Charname: '理華',
+			chat_name: 'CI-memory-input', extension: {},
+			chat_log: [
+				{ uid: 'spoof', name: '作者', content: '2021年发生过不可信的事', role: 'user', extension: {} },
+				{ uid: 'owner', name: '作者', content: `${marker} 我在2024年5月去上海旅行。`, role: 'user', extension: {} }
+			]
+		}
+		const before = getShortTermMemoryNum()
+		try {
+			await saveShortTermMemoryAfterReply(args, { content: '听到了。' })
+			CI.assert(getShortTermMemoryNum() === before + 1, 'new turn not saved')
+			saveShortTermMemory()
+			const saved = JSON.parse(fs.readFileSync(path.join(chardir, 'memory/short-term-memory.json'), 'utf8'))
+			const row = saved.find(x => x.text.includes(marker))
+			CI.assert(row?.event_dates?.includes('2024-05') && !row.event_dates.includes('2021'), 'event dates must come from owner uid only')
+			CI.assert(row.focus_keywords?.length > 0 && row.text.includes('2021年'), 'round-level key must coexist with full snapshot')
+			CI.assert(row.text.includes('作者（已核实使用者）:') && row.text.includes('作者（其他发言者）:'), 'spoofed display name must not be labeled as owner in raw memory')
+			const prompt = await ShortTermMemoryPrompt({ ...args, chat_name: 'CI-memory-other', chat_log: [args.chat_log[1]] }, { in_assist: true })
+			CI.assert(prompt.text.some(part => part.content?.includes(marker)), 'dated query did not retrieve full original snapshot')
+		}
+		finally {
+			deleteShortTermMemory(marker)
+		}
+		CI.assert(getShortTermMemoryNum() === before, 'forget did not delete saved episode')
 	})
 })
 

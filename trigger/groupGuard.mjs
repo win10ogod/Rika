@@ -56,9 +56,10 @@ async function generateDepartureMessage(event, channelHistoryForAI) {
 不要辱罵、威脅、情緒勒索或傷害任何人；只清楚表示「作者不在，所以你不留下」。
 `
 	const insultRequestContext = [
-		...channelHistoryForAI,
+		...channelHistoryForAI.map(row => ({ ...row, uid: row.uid || 'unknown' })),
 		{
 			name: 'system',
+			uid: 'system',
 			role: 'system',
 			time_stamp: Date.now(),
 			content: departureSystemPrompt,
@@ -72,7 +73,9 @@ async function generateDepartureMessage(event, channelHistoryForAI) {
 		chat_name: `${groupNameForAI}-invalid-group`,
 		char_id: BotCharname,
 		Charname: `${fountBotDisplayName}（理華自己）`,
+		CharUid: selfEntityHash || 'char',
 		UserCharname: FountUsername,
+		UserUid: ownerEntityHash() || 'user',
 		ReplyToCharname: '',
 		locales: localhostLocales,
 		time: new Date(),
@@ -84,7 +87,7 @@ async function generateDepartureMessage(event, channelHistoryForAI) {
 		chat_scoped_char_memory: memory,
 		chat_log: await fetchFilesForMessages(insultRequestContext),
 		extension: {
-			bridge: event.group.bridge,
+			chat: { bridge: event.group.bridge },
 			groupId: event.group.groupId,
 			channelId: event.channel.channelId,
 		},

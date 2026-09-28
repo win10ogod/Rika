@@ -19,7 +19,8 @@ import { match_keys, match_keys_all } from '../../scripts/match.mjs'
  * 	createdAt: Date,
  * 	createdContext: string,
  * 	updatedAt?: Date,
- * 	updatedContext?: string
+ * 	updatedContext?: string,
+ * 	revisions?: {trigger: string, prompt: string, since?: Date, until: Date, context?: string}[]
  * }} LongTermMemory
  */
 
@@ -96,6 +97,10 @@ export function formatLongTermMemoryContext(memory) {
 		return `${prefix}${value?.toLocaleString?.() || value}`
 	}).filter(Boolean)
 
+	if (memory.revisions?.length)
+		context_parts.push(`历史版本（仅供追溯，不代表当前事实）：\n${memory.revisions.map(version =>
+			`自 ${version.since || '未知'} 至 ${version.until}：\n旧内容：${version.prompt}\n旧触发条件：${version.trigger}${version.context ? `\n旧版本来源：${version.context}` : ''}`
+		).join('\n')}`)
 	if (!context_parts.length) return `记忆 "${memory.name}" 没有附带任何上下文信息。`
 	return `记忆 "${memory.name}" 的上下文信息：\n${context_parts.join('\n')}`
 }
@@ -167,6 +172,7 @@ ${[activated_memories_text, random_memories_text].filter(Boolean).join('\n')}
 		additional_chat_log: enable_memory_prompt ? [{
 			role: 'system',
 			name: 'system',
+			uid: 'system',
 			content: `\
 你可以通过输出以下格式来追加永久记忆：
 <add-long-term-memory>
@@ -223,6 +229,8 @@ trigger的关键词应容易触发并涵盖大部分情况，鼓励使用或\`||
 
 鼓励你对聊天记录中有关使用者的事情追加和维护永久记忆，不要记录已经在prompt中的内容。
 鼓励你及时修正错误/过时/劣质/不符合角色设定的永久记忆。
+同一事项有新证据时优先更新原记忆，不要留下互相矛盾的有效条目；旧版本只供溯源，不当作现状。若使用者要求遗忘，则删除该条记忆（包括其历史版本）。
+无法从已有对话确认的事实，不要推断成已知的永久记忆。
 严禁使用脚本操作记忆的存档文件。
 `
 		}] : []
@@ -234,8 +242,13 @@ trigger的关键词应容易触发并涵盖大部分情况，鼓励使用或\`||
  * @param {LongTermMemory} memory 记忆
  */
 export function addLongTermMemory(memory) {
-	if (LongTermMemories.find(mem => mem.name === memory.name))
-		LongTermMemories.splice(LongTermMemories.findIndex(mem => mem.name === memory.name), 1)
+	if (LongTermMemories.some(mem => mem.name === memory.name)) {
+		updateLongTermMemory({
+			name: memory.name, trigger: memory.trigger, prompt: memory.prompt,
+			updatedAt: memory.createdAt || new Date(), updatedContext: memory.createdContext
+		})
+		return
+	}
 	LongTermMemories.push(memory)
 	saveLongTermMemory()
 }
@@ -249,6 +262,14 @@ export function updateLongTermMemory({ name, trigger, prompt, updatedAt, updated
 	if (memoryIndex === -1) throw new Error(`Memory with name "${name}" not found for update.`)
 
 	const memoryToUpdate = LongTermMemories[memoryIndex]
+	if ((trigger && trigger !== memoryToUpdate.trigger) || (prompt && prompt !== memoryToUpdate.prompt))
+		memoryToUpdate.revisions = [...(memoryToUpdate.revisions || []), {
+			trigger: memoryToUpdate.trigger,
+			prompt: memoryToUpdate.prompt,
+			since: memoryToUpdate.updatedAt || memoryToUpdate.createdAt,
+			until: updatedAt || new Date(),
+			context: memoryToUpdate.updatedContext || memoryToUpdate.createdContext
+		}]
 
 	if (trigger) memoryToUpdate.trigger = trigger
 	if (prompt) memoryToUpdate.prompt = prompt
@@ -263,7 +284,9 @@ export function updateLongTermMemory({ name, trigger, prompt, updatedAt, updated
  * @param {string} name 记忆名称
  */
 export function deleteLongTermMemory(name) {
-	LongTermMemories.splice(LongTermMemories.findIndex(mem => mem.name === name), 1)
+	const memoryIndex = LongTermMemories.findIndex(mem => mem.name === name)
+	if (memoryIndex === -1) throw new Error(`Memory with name "${name}" not found for deletion.`)
+	LongTermMemories.splice(memoryIndex, 1)
 	saveLongTermMemory()
 }
 
@@ -281,7 +304,7 @@ export function listLongTermMemory() {
  * @returns {LongTermMemory[]} 随机的n个记忆
  */
 export function getRandomNLongTermMemories(n) {
-	return LongTermMemories.sort(() => 0.5 - Math.random()).slice(0, n)
+	return [...LongTermMemories].sort(() => 0.5 - Math.random()).slice(0, n)
 }
 
 /**

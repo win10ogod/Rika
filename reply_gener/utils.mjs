@@ -20,7 +20,7 @@ export function mergeChatLogEntries(logEntries, mergeMessagePeriodMs) {
 	for (let i = 1; i < logEntries.length; i++) {
 		const currentEntry = logEntries[i]
 		if (
-			lastEntry.name === currentEntry.name &&
+			lastEntry.uid && lastEntry.uid === currentEntry.uid &&
 			currentEntry.time_stamp - lastEntry.time_stamp < mergeMessagePeriodMs &&
 			!lastEntry.files?.length
 		) {
@@ -85,10 +85,7 @@ export async function fetchFilesForMessages(messages) {
  * @returns {string} 纯文本内容
  */
 export function rowTextContent(row) {
-	const raw = row?.content
-	if (typeof raw === 'string') return raw
-	if (raw?.content != null) return String(raw.content)
-	return String(raw ?? '')
+	return String(row?.content ?? '')
 }
 
 /**
@@ -96,10 +93,7 @@ export function rowTextContent(row) {
  * @returns {string} 作者 entityHash（小写）
  */
 export function rowAuthorHash(row) {
-	const bridge = row?.extension?.bridge
-	return String(
-		bridge?.authorEntityHash || row.extension?.authorEntityHash || row.sender || '',
-	).toLowerCase()
+	return String(row?.uid || '').toLowerCase()
 }
 
 /**
@@ -108,7 +102,7 @@ export function rowAuthorHash(row) {
  * @returns {boolean} 是否自己发的
  */
 export function rowIsFromSelf(row, selfHash) {
-	return !!(row.charId || row.content?.role === 'char' || rowAuthorHash(row) === selfHash)
+	return !!(selfHash && rowAuthorHash(row) === String(selfHash).toLowerCase())
 }
 
 /**

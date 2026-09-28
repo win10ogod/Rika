@@ -1,4 +1,16 @@
-import { defineToolUseBlocks } from '../../../../../../../src/public/parts/shells/chat/src/streaming/index.mjs'
+import { defineReplyHandler } from '../../../../../../../src/public/parts/shells/chat/src/reply/defineReplyHandler.mjs'
+import { defineReplyPreviews } from '../../../../../../../src/public/parts/shells/chat/src/streaming/index.mjs'
+
+const recommendCommandHandler = defineReplyHandler({
+	tag: 'recommend-command',
+	handle: async (reply, args, call) => {
+		const command = call.inner.trim()
+		if (!command) return {}
+		reply.extension ??= {}
+		reply.extension.recommend_command = reply.recommend_command = command
+		return { content: reply.content.replace(/\s*<recommend-command>[\S\s]*?<\/recommend-command>\s*/g, '\n').trim() }
+	},
+})
 
 /**
  * 推荐命令插件API类型定义
@@ -41,26 +53,13 @@ command_body
 					]
 				}
 			},
-			GetReplyPreviewUpdater: defineToolUseBlocks([
-				{ start: '<recommend-command>', end: '</recommend-command>' }
-			]),
+			GetReplyPreviewUpdater: defineReplyPreviews([recommendCommandHandler]),
 			/**
 			 * 处理回复，提取推荐命令。
 			 * @param {object} result - 结果对象。
 			 * @returns {boolean} - 返回 false 表示此处理器只修改结果，不完全处理回复。
 			 */
-			ReplyHandler: async result => {
-				const match = result.content.match(/<recommend-command>(?<command>[\S\s]*?)<\/recommend-command>/)
-				const command = match?.groups?.command?.trim() // Extract and trim the command
-
-				if (command) {
-					result.extension.recommend_command = result.recommend_command = command
-					result.content = result.content.replace(/\s*<recommend-command>[\S\s]*?<\/recommend-command>\s*/g, '\n').trim() // Also trim result
-				}
-
-				// Return false as this handler only modifies the result, doesn't fully handle the reply
-				return false
-			}
+			ReplyHandler: recommendCommandHandler
 		}
 	}
 }

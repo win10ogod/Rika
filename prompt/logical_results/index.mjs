@@ -1,6 +1,6 @@
 import { findChineseExprsAndNumbers } from '../../scripts/chineseToNumber.mjs'
 import { is_PureChinese } from '../../scripts/langdetect.mjs'
-import { getScopedChatLog, match_keys, match_keys_count, PreprocessChatLogEntry } from '../../scripts/match.mjs'
+import { getScopedChatLog, isReplyToNonMaster, match_keys, match_keys_count, PreprocessChatLogEntry } from '../../scripts/match.mjs'
 import { getExpertiseTopics } from '../role_settings/expertise.mjs'
 
 /**
@@ -26,8 +26,8 @@ import { getExpertiseTopics } from '../role_settings/expertise.mjs'
 export async function buildLogicalResults(args) {
 	/** @type {logical_results_t} */
 	const result = {
-		in_multi_char_chat: new Set([args.Charname, args.ReplyToCharname, args.UserCharname, ...args.chat_log.map(entry => entry.name)].filter(Boolean)).size > 2,
-		in_reply_to_master: args.ReplyToCharname ? args.ReplyToCharname === args.UserCharname : true,
+		in_multi_char_chat: new Set([args.CharUid, args.ReplyToUid, args.UserUid, ...args.chat_log.map(entry => entry.uid)].filter(Boolean)).size > 2,
+		in_reply_to_master: !isReplyToNonMaster(args),
 		in_assist: false,
 		in_subassist: false,
 		is_pure_chinese: false,

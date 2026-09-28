@@ -1,4 +1,4 @@
-import { deleteShortTermMemory, getShortTermMemoryNum } from '../../prompt/memory/short-term-memory.mjs'
+import { deleteShortTermMemory, getShortTermMemoryNum } from '../../prompt/memory/short-term/index.mjs'
 import { parseRegexFromString } from '../../scripts/tools.mjs'
 
 /** @typedef {import("../../../../../../../src/public/parts/shells/chat/decl/chatReplyRequest_t} chatReplyRequest_t */

@@ -150,7 +150,7 @@ function escapeRegExp(value) {
 /** 找出作者最後一則訊息中以 `$skill-name` 明確指定的 Skills。 */
 export function findExplicitSkillNames(args, catalog = discoverSkills()) {
 	const lastUserMessage = [...(args.chat_log || [])].reverse().find(entry =>
-		entry?.role === 'user' && (!args.UserCharname || entry.name === args.UserCharname)
+		entry?.role === 'user' && args.UserUid && entry.uid === args.UserUid
 	)
 	const content = String(lastUserMessage?.content || '')
 	return catalog.skills

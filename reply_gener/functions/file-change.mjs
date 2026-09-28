@@ -243,7 +243,7 @@ export async function file_change(result, { AddLongTimeLog }) {
  * @param {object} args - 预览更新参数。
  * @param {string} filepath - 文件路径。
  * @param {string} content - 要展示的内容。
- * @param {'chat.messageView.toolReadingFilepath'|'chat.messageView.toolReplacingFilepath'|'chat.messageView.toolOverridingFilepath'} titleKey - 标题 i18n 键。
+ * @param {'chat.message.view.tool.readingFilepath'|'chat.message.view.tool.replacingFilepath'|'chat.message.view.tool.overridingFilepath'} titleKey - 标题 i18n 键。
  * @returns {string} 渲染后的 Markdown 代码块。
  */
 function renderFileOperationCodeBlock(args, filepath, content, titleKey) {
@@ -265,7 +265,7 @@ function renderViewFileBlock(content, args) {
 		.filter(Boolean)
 	if (!paths.length) return content
 	return paths.map(filepath =>
-		renderFileOperationCodeBlock(args, filepath, filepath, 'chat.messageView.toolReadingFilepath')
+		renderFileOperationCodeBlock(args, filepath, filepath, 'chat.message.view.tool.readingFilepath')
 	).join('\n\n')
 }
 
@@ -280,11 +280,11 @@ function renderReplaceFileBlock(content, args) {
 	if (!fileBlocks.length) {
 		const filepath = content.match(/<file\s+path="([^"]+)"/)?.[1] || 'unknown'
 		const codeContent = content.match(/<file\s+path="[^"]*">([\s\S]*)/)?.[1] ?? content
-		return renderFileOperationCodeBlock(args, filepath, codeContent, 'chat.messageView.toolReplacingFilepath')
+		return renderFileOperationCodeBlock(args, filepath, codeContent, 'chat.message.view.tool.replacingFilepath')
 	}
 	return fileBlocks.map(match => {
 		const { filepath, filecontent } = match.groups
-		return renderFileOperationCodeBlock(args, filepath, filecontent, 'chat.messageView.toolReplacingFilepath')
+		return renderFileOperationCodeBlock(args, filepath, filecontent, 'chat.message.view.tool.replacingFilepath')
 	}).join('\n\n')
 }
 
@@ -292,17 +292,17 @@ function renderReplaceFileBlock(content, args) {
  * 渲染 <override-file> 内容。
  * @param {string} content - 标签内主体（不含起止标签）。
  * @param {object} args - 预览更新参数。
- * @param {{ groups: { fountToolStart: string } }} [meta] - `defineToolUseBlocks` 传入的具名组。
+ * @param {{ groups: { fountToolStart: string } }} [meta] - 预览处理器传入的起始标签。
  * @returns {string} 渲染结果。
  */
 function renderOverrideFileBlock(content, args, meta) {
 	const startTag = meta?.groups?.fountToolStart ?? ''
 	const filepath = startTag.match(/path="([^"]+)"/)?.[1] || 'unknown'
-	return renderFileOperationCodeBlock(args, filepath, content, 'chat.messageView.toolOverridingFilepath')
+	return renderFileOperationCodeBlock(args, filepath, content, 'chat.message.view.tool.overridingFilepath')
 }
 
 /**
- * 供 `defineToolUseBlocks` 使用的文件类工具标签预览配置（与本模块发出的标签对应）。
+ * 文件类工具标签预览配置（与本模块发出的标签对应）。
  */
 export const fileOperationToolUseBlocks = [
 	{

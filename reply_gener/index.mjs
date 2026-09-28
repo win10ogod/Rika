@@ -7,28 +7,29 @@ import {
 	hydrateBridgeNativeContext,
 } from '../../../../../../src/public/parts/shells/chat/src/chat/lib/codeBridgeContext.mjs'
 import { buildPromptStruct } from '../../../../../../src/public/parts/shells/chat/src/prompt_struct/index.mjs'
-import {
-	defineToolUseBlocks,
-} from '../../../../../../src/public/parts/shells/chat/src/streaming/index.mjs'
+import { defineReplyHandler } from '../../../../../../src/public/parts/shells/chat/src/reply/defineReplyHandler.mjs'
+import { runBeforeReplyHooks, runReplyHandlers } from '../../../../../../src/public/parts/shells/chat/src/reply/handlerPipeline.mjs'
+import { injectRoundEntries } from '../../../../../../src/public/parts/shells/chat/src/reply/roundContext.mjs'
+import { defineReplyPreviews } from '../../../../../../src/public/parts/shells/chat/src/streaming/index.mjs'
 import { noAISourceAvailable, OrderedAISourceCalling, StrictAISourceCalling } from '../AISource/index.mjs'
 import { is_dist } from '../charbase.mjs'
 import { plugins } from '../config/index.mjs'
 import { get_discord_api_plugin } from '../interfaces/discord/api.mjs'
 import { get_telegram_api_plugin } from '../interfaces/telegram/api.mjs'
 import { buildLogicalResults } from '../prompt/logical_results/index.mjs'
-import { saveShortTermMemoryAfterReply } from '../prompt/memory/short-term-memory.mjs'
+import { saveShortTermMemoryAfterReply } from '../prompt/memory/short-term/index.mjs'
 import { hasEncounteredGentianAphrodite, hasUserWithdrawnLoveFromRika } from '../scripts/achievement-triggers.mjs'
 import { unlockAchievement } from '../scripts/achievements.mjs'
 import { addNotifyAbleChannel } from '../scripts/notify.mjs'
+import { isUserSpeaker } from '../scripts/match.mjs'
 import { newCharReply, newUserMessage, saveStatisticDatas, statisticDatas } from '../scripts/statistics.mjs'
 import { MergeMessagePeriodMs } from '../trigger/constants.mjs'
 
 import { handleError } from './error.mjs'
 import { browserIntegration } from './functions/browserIntegration.mjs'
 import { CharGenerator, PersonaGenerator } from './functions/charGenerator.mjs'
-import { coderunner, GetCoderunnerPreviewUpdater } from './functions/coderunner.mjs'
+import { coreToolPlugins } from './functions/core-tools.mjs'
 import { deepResearch } from './functions/deep-research.mjs'
-import { file_change, fileOperationToolUseBlocks } from './functions/file-change.mjs'
 import { getToolInfo } from './functions/getToolInfo.mjs'
 import { IdleManagementHandler } from './functions/idle-management.mjs'
 import { LongTermMemoryHandler } from './functions/long-term-memory.mjs'
@@ -66,6 +67,8 @@ export function getLongTimeLogAdder(result, prompt_struct, max_forever_looping_n
 	 * @param {chatLogEntry_t} entry - 要添加的日志条目。
 	 */
 	function AddLongTimeLog(entry) {
+		entry.uid ??= entry.role === 'char' ? prompt_struct.CharUid
+			: entry.role === 'user' ? prompt_struct.UserUid : 'system'
 		entry.charVisibility = [prompt_struct.char_id]
 		result?.logContextBefore?.push?.(entry)
 		prompt_struct.char_prompt.additional_chat_log.push(entry)
@@ -107,13 +110,15 @@ export async function baseGetReply(args) {
 		files: [],
 		extension: {},
 	}
-	if (!args.extension?.ai_source_override && noAISourceAvailable()) return Object.assign(result, noAIreply(args))
+	// 子代理專用來源優先，其次是本次請求指定的來源；兩者都不走一般模型回退。
+	const strictSource = args.extension?.ai_source_override ?? args.ai_source
+	if (!strictSource && noAISourceAvailable()) return Object.assign(result, noAIreply(args))
 	// 延續舊平台接入的 180 秒同人訊息合併語義。
 	args.chat_log = mergeChatLogEntries(args.chat_log, MergeMessagePeriodMs)
 	// 新版 fount 由 shell bridge 管理 TG/DC；只為目前橋接平台注入原生 API 上下文。
 	const platformPlugins = {}
 	if (!args.extension?.is_sub_agent) {
-		const bridgePlatform = args.extension?.bridge?.platform
+		const bridgePlatform = args.extension?.chat?.bridge?.platform
 		const groupId = args.extension?.groupId
 		const channelId = args.extension?.channelId
 		const triggerEntry = findTriggerChatLogEntry(args.chat_log)
@@ -125,17 +130,19 @@ export async function baseGetReply(args) {
 		else if (bridgePlatform === 'discord')
 			platformPlugins.discord_api = get_discord_api_plugin(nativeContext)
 	}
+	args.workdir ??= args.chat_scoped_char_memory?.workdir
 	args.plugins = args.extension?.is_sub_agent
-		? Object.assign({}, args.plugins)
-		: Object.assign({}, plugins, platformPlugins, args.plugins)
+		? Object.assign({}, args.plugins, coreToolPlugins)
+		: Object.assign({}, plugins, platformPlugins, args.plugins, coreToolPlugins)
 	const prompt_struct = Object.assign(await buildPromptStruct(args), {
 		alternative_charnames: ['Rika', '理華', '理华']
 	})
 	const logical_results = await buildLogicalResults(args, prompt_struct, 0)
 	const AddLongTimeLog = getLongTimeLogAdder(result, prompt_struct)
+	await runBeforeReplyHooks({ ...args, prompt_struct, AddLongTimeLog })
 	const last_entry = args.chat_log.slice(-1)[0]
-	if (last_entry?.name == args.UserCharname && last_entry.role == 'user')
-		newUserMessage(last_entry.content, args.extension?.bridge?.platform || 'chat')
+	if (last_entry?.role === 'user' && isUserSpeaker(last_entry, args))
+		newUserMessage(last_entry.content, args.extension?.chat?.bridge?.platform || 'chat')
 	// 构建更新预览管线
 	args.generation_options ??= {}
 	const oriReplyPreviewUpdater = args.generation_options?.replyPreviewUpdater
@@ -145,10 +152,7 @@ export async function baseGetReply(args) {
 	 */
 	let replyPreviewUpdater = (args, r) => oriReplyPreviewUpdater?.(r)
 	for (const GetReplyPreviewUpdater of [
-		defineToolUseBlocks([
-			// File operations (file-change.mjs)
-			...fileOperationToolUseBlocks,
-
+		defineReplyPreviews([
 			// Memory management (long-term-memory.mjs & short-term-memory.mjs)
 			{ start: '<add-long-term-memory>', end: '</add-long-term-memory>' },
 			{ start: '<update-long-term-memory>', end: '</update-long-term-memory>' },
@@ -165,7 +169,8 @@ export async function baseGetReply(args) {
 			{ start: '<deep-research>', end: '</deep-research>' },
 
 			// Sub-agent delegation (sub-agent.mjs)
-			{ start: /<(?:delegate-agent|sub-agent)\b[^>]*>/i, end: /<\/(?:delegate-agent|sub-agent)>/i },
+			{ start: '<delegate-agent>', end: '</delegate-agent>' },
+			{ start: '<sub-agent>', end: '</sub-agent>' },
 
 			// Character-native Skills
 			{ start: '<activate-skill>', end: '</activate-skill>' },
@@ -204,8 +209,18 @@ export async function baseGetReply(args) {
 			{ start: '<get-tool-info>', end: '</get-tool-info>' },
 			{ start: /<generate-char[^>]*>/, end: '</generate-char>' },
 			{ start: /<generate-persona[^>]*>/, end: '</generate-persona>' },
-		]),
-		GetCoderunnerPreviewUpdater(),
+		].map(pair => {
+			const tag = (pair.start instanceof RegExp ? pair.start.source : pair.start).match(/<([a-z][\w-]*)/)?.[1]
+			if (!tag) throw new Error(`Unknown preview tag: ${pair.start}`)
+			return defineReplyHandler({
+				tag,
+				// Preview-only: the character's existing reply handlers still execute these tools.
+				display: pair.renderPending ? (call, state, previewArgs) => pair.renderPending(call.inner, previewArgs, {
+					groups: { fountToolStart: call.raw.match(/^<[^>]*>/)?.[0] ?? '' }
+				}) : undefined,
+				handle: async () => ({}),
+			})
+		})),
 		...Object.values(args.plugins).map(plugin => plugin.interfaces?.chat?.GetReplyPreviewUpdater)
 	].filter(Boolean))
 		replyPreviewUpdater = GetReplyPreviewUpdater(replyPreviewUpdater)
@@ -216,6 +231,8 @@ export async function baseGetReply(args) {
 	 */
 	args.generation_options.replyPreviewUpdater = r => replyPreviewUpdater(args, r)
 	regen: while (true) {
+		// set-workdir 會把預設目標持久化到聊天作用域；後續生成同步回請求層使用。
+		args.workdir ??= args.chat_scoped_char_memory?.workdir
 		if (!is_dist && process.env.EdenOS) {
 			console.log('logical_results', logical_results)
 			console.log('prompt_struct', prompt_struct)
@@ -235,8 +252,8 @@ export async function baseGetReply(args) {
 			if (!result.content.trim() && !result.files?.length) throw new Error('empty reply')
 			return result
 		}
-		const requestresult = args.extension?.ai_source_override
-			? await StrictAISourceCalling(args.extension.ai_source_override, callSource)
+		const requestresult = strictSource
+			? await StrictAISourceCalling(strictSource, callSource)
 			: await OrderedAISourceCalling(AItype, callSource)
 		result.content = requestresult.content
 		result.files = result.files.concat(requestresult.files || [])
@@ -247,6 +264,7 @@ export async function baseGetReply(args) {
 				lastlog.logContextAfter ??= []
 				lastlog.logContextAfter.push({
 					name: '理華',
+					uid: args.CharUid,
 					role: 'char',
 					content: '<-<null>->',
 					charVisibility: [args.char_id]
@@ -260,6 +278,7 @@ export async function baseGetReply(args) {
 				lastlog.logContextAfter ??= []
 				lastlog.logContextAfter.push({
 					name: '理華',
+					uid: args.CharUid,
 					role: 'char',
 					content: '<-<error>->',
 					charVisibility: [args.char_id]
@@ -274,26 +293,42 @@ export async function baseGetReply(args) {
 		const replyHandlers = [
 			SkillsHandler, getToolInfo, CharGenerator, PersonaGenerator,
 			args.extension?.is_sub_agent ? null : subAgentHandler,
-			coderunner, LongTermMemoryHandler, ShortTermMemoryHandler,
-			deepResearch, websearch, webbrowse, rolesettingfilter, file_change, browserIntegration, IdleManagementHandler,
+			LongTermMemoryHandler, ShortTermMemoryHandler,
+			deepResearch, websearch, webbrowse, rolesettingfilter, browserIntegration, IdleManagementHandler,
 			args.extension?.is_sub_agent ? null : notifyHandler,
 			!args.extension?.is_sub_agent && args.supported_functions.add_message ? timer : null,
-			...Object.values(args.plugins).map(plugin => plugin.interfaces.chat?.ReplyHandler)
 		].filter(Boolean)
+		const handlerArgs = {
+			...args, AddLongTimeLog, prompt_struct, main_AIsource, extension: {
+				...args.extension,
+				logical_results
+			}
+		}
 		let continue_regen = false
 		for (const replyHandler of replyHandlers)
-			if (await replyHandler(result, {
-				...args, AddLongTimeLog, prompt_struct, main_AIsource, extension: {
-					...args.extension,
-					logical_results
-				}
-			}))
-				continue_regen = true
-		if (continue_regen) continue regen
+			if (await replyHandler(result, handlerArgs)) continue_regen = true
+		// 舊式函式 handler 保留原契約；宣告式 plugin handlers 合併為同一條管線，
+		// 讓跨工具呼叫依生成文字順序執行，並只記錄一次本輪原始生成。
+		const declarativePluginHandlers = []
+		for (const plugin of Object.values(args.plugins)) {
+			const pluginHandler = plugin.interfaces?.chat?.ReplyHandler
+			if (!pluginHandler) continue
+			if (typeof pluginHandler === 'function') {
+				if (await pluginHandler(result, handlerArgs)) continue_regen = true
+			}
+			else declarativePluginHandlers.push(pluginHandler)
+		}
+		if (declarativePluginHandlers.length && await runReplyHandlers(result, handlerArgs, declarativePluginHandlers))
+			continue_regen = true
+		if (continue_regen) {
+			await injectRoundEntries(args, prompt_struct)
+			if (typeof args.generation_options.finishRound === 'function' && !await args.generation_options.finishRound()) break
+			continue regen
+		}
 		break
 	}
-	if (last_entry?.name == args.UserCharname && last_entry.role == 'user') {
-		newCharReply(result.content, args.extension?.bridge?.platform || 'chat')
+	if (last_entry?.role === 'user' && isUserSpeaker(last_entry, args)) {
+		newCharReply(result.content, args.extension?.chat?.bridge?.platform || 'chat')
 		if (!statisticDatas.firstInteraction.time) {
 			statisticDatas.firstInteraction = {
 				time: Date.now(),

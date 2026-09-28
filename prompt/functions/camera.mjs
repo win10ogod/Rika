@@ -61,6 +61,7 @@ export async function CameraPrompt(args, logical_results) {
 		} catch (e) { console.error(e) }
 		additional_chat_log.push({
 			name: 'system',
+			uid: 'system',
 			role: 'system',
 			content: [`\
 这是你作者的摄像头照片，供你观察与参考。

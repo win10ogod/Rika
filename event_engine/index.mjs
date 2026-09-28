@@ -67,12 +67,15 @@ export function initRealityChannel() {
 		char_id: charname,
 		username,
 		Charname: '理華',
+		CharUid: 'char',
 		UserCharname: username,
+		UserUid: 'user',
 		locales: localhostLocales,
 		time: new Date(),
 		chat_log: [
 			{
 				name: 'system',
+				uid: 'system',
 				role: 'system',
 				content: `\
 描述下你对所处环境的理解，并发送一个\`测试通知\`。
@@ -80,6 +83,7 @@ export function initRealityChannel() {
 			},
 			{
 				name: '理華',
+				uid: 'char',
 				role: 'char',
 				content: `\
 這是內部背景頻道，普通文字不會直接顯示給使用者。
@@ -89,6 +93,7 @@ export function initRealityChannel() {
 			},
 			{
 				name: 'system',
+				uid: 'system',
 				role: 'system',
 				content: `\
 已确认通知，进入实际环境。
@@ -102,7 +107,7 @@ export function initRealityChannel() {
 		 */
 		AddChatLogEntry: entry => {
 			console.dir(entry, { depth: null })
-			RealityChannel.chat_log.push(entry)
+			RealityChannel.chat_log.push({ ...entry, uid: entry.uid || (entry.role === 'system' || entry.role === 'tool' ? 'system' : entry.role === 'user' ? 'user' : 'char') })
 		},
 		other_chars: {},
 		plugins: {},
